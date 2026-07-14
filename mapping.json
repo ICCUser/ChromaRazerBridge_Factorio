@@ -1,0 +1,57 @@
+{
+  "layout": "azerty_fr",
+  "poll_seconds": 0.2,
+
+  "ambient": {
+    "devices": ["mouse", "chromalink"],
+    "color1": [230, 100, 20],
+    "color2": [20, 10, 0],
+    "thresholds": [
+      {"min_evolution": 0.7, "color1": [200, 30, 0], "color2": [20, 0, 0]},
+      {"min_pollution": 50, "color1": [140, 110, 20], "color2": [20, 15, 0]},
+      {"min_daytime": 0.75, "color1": [30, 30, 80], "color2": [5, 5, 20]},
+      {"max_daytime": 0.15, "color1": [30, 30, 80], "color2": [5, 5, 20]}
+    ]
+  },
+
+  "keyboard_idle": {
+    "color1": [230, 100, 20],
+    "color2": [20, 10, 0]
+  },
+
+  "research_bar": {
+    "enabled": true,
+    "keys": ["F1", "F2", "F3", "F4", "F5", "F6", "F7", "F8", "F9", "F10", "F11", "F12"],
+    "color_bar": [0, 255, 60],
+    "color_empty": [20, 20, 20]
+  },
+
+  "health_bar": {
+    "enabled": true,
+    "keys": ["1", "2", "3", "4", "5", "6", "7", "8", "9", "0"],
+    "color_bar": [0, 255, 0],
+    "color_empty": [40, 0, 0]
+  },
+
+  "alerts": {
+    "entity_under_attack": {"device": "all", "color": [255, 0, 0], "blink": false, "priority": 10},
+    "turret_fire": {"device": "all", "color": [255, 0, 0], "blink": false, "priority": 10},
+    "no_power": {"device": "keyboard", "scope": "zone:movement", "color": [255, 0, 255], "blink": true, "blink_interval": 0.4, "priority": 9},
+    "low_power": {"device": "keyboard", "scope": "zone:movement", "color": [255, 140, 0], "blink": false, "priority": 6},
+    "train_out_of_fuel": {"device": "keyboard", "scope": "zone:arrows", "color": [255, 140, 0], "blink": false, "priority": 8},
+    "train_no_path": {"device": "keyboard", "scope": "zone:arrows", "color": [255, 60, 0], "blink": true, "blink_interval": 0.5, "priority": 8},
+    "not_enough_repair_packs": {"device": "keyboard", "scope": "zone:movement", "color": [255, 200, 0], "blink": false, "priority": 5},
+    "no_material_for_construction": {"device": "keyboard", "scope": "zone:movement", "color": [255, 200, 0], "blink": false, "priority": 5},
+    "not_enough_construction_robots": {"device": "keyboard", "scope": "zone:movement", "color": [255, 200, 0], "blink": false, "priority": 5},
+    "no_storage": {"device": "keyboard", "scope": "zone:movement", "color": [255, 200, 0], "blink": false, "priority": 5}
+  },
+
+  "events": {
+    "research_finished": {"device": "all", "color": [0, 255, 60], "blink": true, "blink_interval": 0.2, "hold": 3.0},
+    "base_under_attack": {"device": "all", "color": [255, 0, 0], "blink": false, "hold": 3.0},
+    "rocket_launched": {"device": "all", "style": "spectrum", "hold": 4.0},
+    "player_died": {"device": "all", "color": [120, 0, 0], "blink": false, "hold": 3.0},
+    "train_arrived": {"device": "keyboard", "scope": "zone:arrows", "color": [0, 180, 255], "blink": false, "hold": 2.0},
+    "item_crafted": {"device": "keyboard", "scope": "zone:movement", "color": [80, 200, 80], "blink": false, "hold": 0.4}
+  }
+}
