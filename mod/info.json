@@ -4,5 +4,5 @@
   "title": "Chroma Bridge",
   "author": "ICCUser & Ibalek",
   "factorio_version": "2.0",
-  "description": "Ecrit l'etat de la partie (recherche, alertes, trains, evenements) dans des fichiers JSON lus par un bridge externe pour piloter le RGB Razer Chroma. Interface en jeu (CONTROL+SHIFT+C) pour configurer quel appareil/touche/couleur/clignotement est associe a chaque evenement, avec clavier virtuel, explorateur d'evenements (avec ventilation par mod), alertes personnalisees basees sur les haut-parleurs programmables et alerte de proximite train."
+  "description": "Fais de ton clavier et ta souris Razer Chroma le tableau de bord vivant de ta partie : recherche en cours, base attaquee, fusee qui decolle -- et une vraie alerte de securite si un train te fonce dessus. Tout se regle en jeu (CONTROL+SHIFT+C), sans toucher un seul fichier : couleur, touche, clignotement, alertes personnalisees via haut-parleur programmable. Solo ou multijoueur (chaque joueur garde sa propre config). Windows (Razer Synapse) pleinement supporte, Linux (OpenRazer) implemente. Necessite un petit bridge Python externe, gratuit et open-source -- voir le depot GitHub pour l'installation complete."
 }
