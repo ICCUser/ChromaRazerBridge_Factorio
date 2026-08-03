@@ -1,12 +1,19 @@
 -- Chroma Bridge - control.lua
 -- Ecrit dans script-output/ :
---   chroma_status.json    -> etat continu (ecrase a chaque tick de polling)
---   chroma_events.jsonl   -> evenements discrets (une ligne JSON ajoutee par evenement,
---                            vide en debut de session PUIS periodiquement (voir
---                            EVENTS_RESET_INTERVAL_TICKS) pour ne pas grossir sans fin
---                            sur une session tres longue -- voir plus bas)
---   chroma_mapping.json   -> config appareil/touche/couleur/clignotement editee
---                            depuis l'interface en jeu (CONTROL+SHIFT+C), voir gui.lua
+--   chroma_status.json         -> etat continu, partage pour toute l'equipe
+--                                 (ecrase a chaque tick de polling)
+--   chroma_events.jsonl        -> evenements discrets PARTAGES (recherche, base
+--                                 attaquee, fusee, train a quai -- concernent
+--                                 toute l'equipe, pas un joueur en particulier)
+--   chroma_player_events.jsonl -> evenements discrets PRIVES a un joueur (ex:
+--                                 craft manuel) -- ecrit avec player_index
+--                                 cible, n'atterrit que sur sa machine
+--   Les deux fichiers d'evenements sont vides en debut de session PUIS
+--   periodiquement (voir EVENTS_RESET_INTERVAL_TICKS) pour ne pas grossir
+--   sans fin sur une session tres longue -- voir plus bas.
+--   chroma_mapping.json        -> config appareil/touche/couleur/clignotement
+--                                 editee depuis l'interface en jeu
+--                                 (CONTROL+SHIFT+C), voir gui.lua -- privee
 --
 -- Les fichiers sont dans :
 --   %APPDATA%\Factorio\script-output\  (Windows)
@@ -31,7 +38,10 @@ for name, id in pairs(defines.alert_type) do
   ALERT_TYPE_NAMES[id] = name
 end
 
-local last_craft_event_tick = 0
+local last_craft_event_tick = {} -- par joueur (event.player_index) : le seuil anti-spam
+                                   -- (CRAFT_EVENT_MIN_INTERVAL) ne doit s'appliquer qu'a un
+                                   -- meme joueur qui craft en rafale, pas empecher le craft
+                                   -- d'un autre joueur juste parce que le premier vient d'agir
 local POWER_SCAN_RADIUS = 150 -- tuiles autour de chaque joueur connecte (pas toute la base, pour les perfs)
 local TRAIN_PROXIMITY_RADIUS = 15 -- bien plus serre que POWER_SCAN_RADIUS : "danger immediat", pas "quelque part dans la base"
 
@@ -259,20 +269,29 @@ local function write_status()
   gui.ensure_mapping_files()
 end
 
--- chroma_events.jsonl est en ecriture "append" (voir les script.on_event
--- plus bas) : sans purge, il grossit indefiniment d'une session a l'autre,
--- et un bridge redemarre en cours de partie relirait tout l'historique
--- depuis le debut (voir factorio_watcher.py cote Python, qui se protege
--- desormais aussi de son cote). "session_events_reset" est un upvalue Lua
--- simple (PAS dans storage, qui est sauvegarde avec la partie) : il repart
--- a false a chaque (re)chargement de la partie, donc ce bloc ne s'execute
--- qu'une fois par lancement, au premier tick de poll.
+-- Les deux fichiers d'evenements (chroma_events.jsonl partage, et le canal
+-- prive chroma_player_events.jsonl de chaque joueur connecte) sont en
+-- ecriture "append" : sans purge, ils grossissent indefiniment d'une session
+-- a l'autre, et un bridge redemarre en cours de partie relirait tout
+-- l'historique depuis le debut (voir factorio_watcher.py cote Python, qui se
+-- protege desormais aussi de son cote).
+local function reset_events_files()
+  util.reset_file("chroma_events.jsonl")
+  for _, player in pairs(game.connected_players) do
+    util.reset_file("chroma_player_events.jsonl", player.index)
+  end
+end
+
+-- "session_events_reset" est un upvalue Lua simple (PAS dans storage, qui
+-- est sauvegarde avec la partie) : il repart a false a chaque (re)chargement
+-- de la partie, donc ce bloc ne s'execute qu'une fois par lancement, au
+-- premier tick de poll.
 local session_events_reset = false
 
 script.on_nth_tick(POLL_INTERVAL_TICKS, function()
   if not session_events_reset then
     session_events_reset = true
-    util.reset_file("chroma_events.jsonl")
+    reset_events_files()
   end
   local ok, err = pcall(write_status)
   if not ok then
@@ -281,15 +300,13 @@ script.on_nth_tick(POLL_INTERVAL_TICKS, function()
 end)
 
 -- Purge periodique en plus de celle de debut de session (voir
--- EVENTS_RESET_INTERVAL_TICKS) : sur une session de plusieurs heures, le
--- fichier ne doit jamais accumuler plus de ~10 min d'evenements avant d'etre
--- vide. game.tick continue a compter d'une session a l'autre (persiste avec
--- la partie), donc on_nth_tick reste aligne sur des intervalles reguliers de
--- temps de jeu reellement ecoule, independamment du moment ou la partie a
--- ete (re)chargee.
-script.on_nth_tick(EVENTS_RESET_INTERVAL_TICKS, function()
-  util.reset_file("chroma_events.jsonl")
-end)
+-- EVENTS_RESET_INTERVAL_TICKS) : sur une session de plusieurs heures, les
+-- fichiers ne doivent jamais accumuler plus de ~10 min d'evenements avant
+-- d'etre vides. game.tick continue a compter d'une session a l'autre
+-- (persiste avec la partie), donc on_nth_tick reste aligne sur des
+-- intervalles reguliers de temps de jeu reellement ecoule, independamment
+-- du moment ou la partie a ete (re)chargee.
+script.on_nth_tick(EVENTS_RESET_INTERVAL_TICKS, reset_events_files)
 
 -- Evenement : recherche terminee
 script.on_event(defines.events.on_research_finished, function(event)
@@ -325,7 +342,9 @@ script.on_event(defines.events.on_rocket_launched, function(event)
   record_mod_count("rocket_launched", event_explorer.mod_of(silo_or_rocket and silo_or_rocket.prototype))
 end)
 
--- Evenement : joueur mort
+-- Evenement : joueur mort. Volontairement PARTAGE (pas cible sur
+-- event.player_index) : savoir qu'un coequipier vient de mourir est une
+-- alerte d'equipe utile pour tout le monde, pas seulement pour la victime.
 script.on_event(defines.events.on_player_died, function(event)
   util.safe_write_json("chroma_events.jsonl", {
     type = "player_died",
@@ -347,18 +366,22 @@ script.on_event(defines.events.on_train_changed_state, function(event)
   end
 end)
 
--- Evenement : objet fabrique (manuellement) -- limite en frequence pour eviter
--- de spammer chroma_events.jsonl lors d'un craft en masse.
+-- Evenement : objet fabrique (manuellement) -- action individuelle, ecrite
+-- dans le canal PRIVE du joueur concerne (event.player_index) : sans ca, le
+-- craft d'un joueur ferait clignoter le clavier de tous les autres joueurs
+-- connectes. Limite en frequence (par joueur -- voir last_craft_event_tick)
+-- pour eviter de spammer le fichier lors d'un craft en masse.
 script.on_event(defines.events.on_player_crafted_item, function(event)
-  if game.tick - last_craft_event_tick < CRAFT_EVENT_MIN_INTERVAL then
+  local last_tick = last_craft_event_tick[event.player_index] or 0
+  if game.tick - last_tick < CRAFT_EVENT_MIN_INTERVAL then
     return
   end
-  last_craft_event_tick = game.tick
-  util.safe_write_json("chroma_events.jsonl", {
+  last_craft_event_tick[event.player_index] = game.tick
+  util.safe_write_json("chroma_player_events.jsonl", {
     type = "item_crafted",
     tick = game.tick,
     item = event.item_stack and event.item_stack.valid and event.item_stack.name or nil,
-  }, true)
+  }, true, event.player_index)
   local stack = event.item_stack
   record_mod_count("item_crafted", event_explorer.mod_of(stack and stack.valid and stack.prototype))
 end)

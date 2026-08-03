@@ -236,7 +236,8 @@ exact selon l'OS) :
 | `chroma_player_status.json` | Prive (sous-dossier par joueur) | Vie, pollution locale, alertes, heure du jour |
 | `chroma_train_proximity.json` | Prive (sous-dossier par joueur) | Alerte train a proximite, rafraichie ~10x/s |
 | `chroma_mapping.json` | Prive (sous-dossier par joueur) | Config editee en jeu (CONTROL+SHIFT+C) |
-| `chroma_events.jsonl` | Partage (toute l'equipe) | Evenements ponctuels, vide en debut de session puis toutes les ~10 min |
+| `chroma_events.jsonl` | Partage (toute l'equipe) | Evenements ponctuels concernant l'equipe entiere (recherche, base attaquee, fusee, train a quai, mort d'un joueur -- volontairement une alerte d'equipe), vide en debut de session puis toutes les ~10 min |
+| `chroma_player_events.jsonl` | Prive (sous-dossier par joueur) | Evenements ponctuels propres a ce joueur (craft manuel), meme rythme de purge que ci-dessus |
 
 "Prive" = ecrit par Factorio uniquement dans le sous-dossier numerique
 (`script-output/<player_index>/`) de la machine du joueur concerne -- invisible
