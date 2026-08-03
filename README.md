@@ -3,11 +3,52 @@
 Pilote ton clavier / souris / tapis de souris Razer Chroma en fonction de l'etat
 de ta partie Factorio (recherche en cours, attaques de biters, trains, fusees,
 alertes logistiques...), avec une configuration entierement personnalisable
-**depuis le jeu** (raccourci `CONTROL+SHIFT+C`).
+**depuis le jeu** (raccourci `CONTROL+SHIFT+C`). Fonctionne en solo comme en
+multi-joueur : chaque joueur connecte a sa propre configuration et son propre
+etat (vie, pollution, alertes), independants des autres.
 
 Deux morceaux, obligatoirement separes (voir "Pourquoi deux morceaux ?" plus bas) :
 - Un **mod Factorio** (Lua) qui ecrit l'etat de la partie dans des fichiers JSON.
-- Un **bridge Python** qui lit ces fichiers et pilote le SDK REST Chroma de Razer Synapse.
+- Un **bridge Python** qui lit ces fichiers et pilote soit le SDK REST Chroma de
+  Razer Synapse (Windows), soit OpenRazer (Linux).
+
+## Fonctionnalites
+
+- **Etat du jeu -> RGB** : recherche en cours (barre de progression sur les
+  touches F1-F12), vie du joueur (barre sur 1-9/0), attaques de biters, trains
+  a quai/sans chemin/en panne de carburant, fusees lancees, mort du joueur,
+  alertes logistiques (stockage plein, manque de robots/materiaux/reparations),
+  sous-alimentation electrique.
+- **Alerte de securite** : un train en mouvement a proximite immediate du
+  joueur declenche une alerte distincte, pensee pour reagir plus vite que le reste du
+  statut (verifie ~10x/seconde).
+- **Alertes personnalisees** : associe une couleur au message d'un
+  haut-parleur programmable (texte libre de ton choix, ex: alerte de base
+  attaquee par un mod tiers) sans toucher au code.
+- **Multi-joueur** : la configuration et l'etat de chaque joueur connecte sont
+  prives (stockes dans un sous-dossier separe par joueur) -- deux personnes
+  sur le meme serveur peuvent avoir des reglages Chroma completement
+  differents sans se marcher dessus.
+- **Explorateur d'evenements** (en jeu) : liste tous les events/alertes
+  disponibles, avec pour chacun quels mods l'ont declenche et combien de fois
+  cette partie -- utile pour cabler un mod tiers sans lire son code source.
+- **Tout se configure en jeu** (`CONTROL+SHIFT+C`) : clavier virtuel AZERTY/QWERTY
+  pour choisir une touche/zone precise, barre de recherche et barre de vie
+  personnalisables, couleur par defaut (fixe ou reactive a l'evolution des
+  biters / la pollution / le jour-nuit).
+
+---
+
+## Pourquoi deux morceaux ?
+
+Un mod Factorio tourne dans le bac a sable Lua du jeu : pas d'acces reseau, pas
+d'acces au systeme de fichiers en dehors de `script-output/`, donc aucun moyen
+d'appeler le SDK REST de Razer Synapse ou la bibliotheque Python OpenRazer
+directement depuis `control.lua`. Le mod se contente donc d'ecrire l'etat de
+la partie dans des fichiers JSON ; un script Python externe (qui, lui, a acces
+au reseau/systeme) les relit et pilote le RGB. C'est aussi ce qui permet au
+bridge de tourner independamment du jeu (redemarrage sans recharger la partie,
+diagnostic hors Factorio via `diagnose.py`, etc.).
 
 ---
 
@@ -23,7 +64,7 @@ Deux morceaux, obligatoirement separes (voir "Pourquoi deux morceaux ?" plus bas
 ### Etapes
 
 1. **Copier le mod** : copie le dossier `mod/` de ce repo dans `%APPDATA%\Factorio\mods\`
-   en le renommant `chroma-bridge_1.4.1` (le nom du dossier de developpement
+   en le renommant `chroma-bridge_1.5.0` (le nom du dossier de developpement
    n'a pas d'importance pour Factorio, seul `info.json` compte, mais ca evite
    toute confusion). Verifie qu'il apparait et est active dans le launcher
    Factorio (liste des mods).
@@ -104,6 +145,10 @@ client selon `sys.platform`, aucune autre difference entre les deux OS.
 - `pip install openrazer requests`
 - Factorio 2.0+ avec le mod copie dans `~/.factorio/mods/` (ou l'equivalent
   selon ton installation -- Steam vs binaire officiel changent l'emplacement).
+  Le bridge detecte automatiquement `~/.factorio/` (installation native) puis
+  `~/.var/app/com.valvesoftware.Steam/.factorio/` (Steam via Flatpak) ; si ton
+  installation utilise un autre emplacement, indique-le explicitement en
+  passant `script_output_dir` a `FactorioWatcher` (voir `factorio_watcher.py`).
 
 ### Etapes
 
@@ -159,3 +204,28 @@ Cote mod (`mod/`, source de verite -- a copier/symlinker dans `%APPDATA%\Factori
 `control.lua` (evenements de jeu), `gui.lua` (interface CONTROL+SHIFT+C), `event_explorer.lua`
 (explorateur d'evenements), `keyboard_layout_data.lua` (grille clavier, genere),
 `util.lua` (ecriture JSON partagee), `data.lua` (raccourci clavier), `info.json`.
+
+### Fichiers echanges (mod -> bridge)
+
+Ecrits dans `script-output/` (voir `factorio_watcher.py` pour l'emplacement
+exact selon l'OS) :
+
+| Fichier | Portee | Contenu |
+|---|---|---|
+| `chroma_status.json` | Partage (toute l'equipe) | Recherche en cours, evolution des biters |
+| `chroma_player_status.json` | Prive (sous-dossier par joueur) | Vie, pollution locale, alertes, heure du jour |
+| `chroma_train_proximity.json` | Prive (sous-dossier par joueur) | Alerte train a proximite, rafraichie ~10x/s |
+| `chroma_mapping.json` | Prive (sous-dossier par joueur) | Config editee en jeu (CONTROL+SHIFT+C) |
+| `chroma_events.jsonl` | Partage (toute l'equipe) | Evenements ponctuels, vide en debut de session puis toutes les ~10 min |
+
+"Prive" = ecrit par Factorio uniquement dans le sous-dossier numerique
+(`script-output/<player_index>/`) de la machine du joueur concerne -- invisible
+pour les autres joueurs connectes, y compris en multi-joueur.
+
+---
+
+## Credits
+
+- **ICCUser** -- bridge Windows/Razer Synapse, mod Factorio, architecture initiale.
+- **Ibalek** -- client Linux/OpenRazer, support multi-joueur, alertes
+  personnalisees, alerte de proximite de train, explorateur d'evenements par mod.
