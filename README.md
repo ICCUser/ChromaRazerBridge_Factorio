@@ -180,6 +180,9 @@ client selon `sys.platform`, aucune autre difference entre les deux OS.
   petit des deux cote code, mais l'alignement touche par touche n'est pas
   garanti tant que non teste -- meme demarche que `calibrate.py` a prevoir.
 
+Voir [TESTING_LINUX.md](TESTING_LINUX.md) pour une checklist detaillee de
+validation sur materiel reel.
+
 ---
 
 ## Structure du projet
@@ -204,6 +207,23 @@ Cote mod (`mod/`, source de verite -- a copier/symlinker dans `%APPDATA%\Factori
 `control.lua` (evenements de jeu), `gui.lua` (interface CONTROL+SHIFT+C), `event_explorer.lua`
 (explorateur d'evenements), `keyboard_layout_data.lua` (grille clavier, genere),
 `util.lua` (ecriture JSON partagee), `data.lua` (raccourci clavier), `info.json`.
+
+### Workflow de dev cote mod
+
+`mod/` (ce repo) est **la seule source de verite** pour le mod Lua. Le
+symlink (`mklink /J` Windows, `ln -s` Linux) vers `%APPDATA%\Factorio\mods\`
+ou `~/.factorio/mods/` sert a tester en jeu -- ne modifie jamais directement
+les fichiers dans le dossier de mods de Factorio sans symlink : ce dossier
+n'est pas versionne, et un changement fait uniquement la-bas est perdu au
+prochain `git pull` (c'est exactement ce qui s'est passe pendant le
+developpement de la 1.4.1, d'ou la reconciliation manuelle qui a suivi).
+Pour publier une nouvelle version :
+
+1. Modifie `mod/`, incremente `version` dans `mod/info.json`.
+2. `python package_mod.py` -> produit `dist/chroma-bridge_<version>.zip`.
+3. Upload ce zip comme nouvelle release sur le [Mod Portal](https://mods.factorio.com/)
+   -- le portail ne remplace pas le contenu d'une version deja publiee,
+   chaque changement (meme juste une image) exige un nouveau numero.
 
 ### Fichiers echanges (mod -> bridge)
 
