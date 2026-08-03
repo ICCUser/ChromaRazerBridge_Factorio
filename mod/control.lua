@@ -114,6 +114,17 @@ local function count_player_alerts(player)
   return counts
 end
 
+-- Lecture de entity.status isolee dans une fonction nommee (definie une
+-- seule fois) plutot qu'une fermeture ad hoc recreee a chaque entite : ce
+-- scan tourne 1x/seconde par joueur connecte sur potentiellement des
+-- centaines/milliers d'entites (voir POWER_SCAN_RADIUS), pas la peine
+-- d'allouer une nouvelle closure a chaque iteration. pcall reste necessaire
+-- : certains types d'entites renvoyees par le filtre (force = "player")
+-- n'exposent pas .status de maniere fiable.
+local function read_entity_status(entity)
+  return entity.status
+end
+
 -- Compte, autour d'UN joueur donne (rayon borne, pas toute la base), ses
 -- entites actuellement en sous-alimentation electrique. Pas un alert_type
 -- natif de Factorio, donc compte a part et fusionne dans alerts_by_type pour
@@ -127,7 +138,7 @@ local function count_player_power_issues(player)
       force = "player",
     }
     for _, entity in pairs(entities) do
-      local ok, status = pcall(function() return entity.status end)
+      local ok, status = pcall(read_entity_status, entity)
       if ok then
         if status == defines.entity_status.no_power then
           counts.no_power = counts.no_power + 1
@@ -139,6 +150,12 @@ local function count_player_power_issues(player)
   end
   return counts
 end
+
+-- Types de materiel roulant a considerer : pas seulement les locomotives --
+-- un train long peut avoir sa locomotive a plus de TRAIN_PROXIMITY_RADIUS du
+-- joueur alors qu'un wagon du meme convoi est juste a cote (danger reel
+-- manque si on ne cherche que "locomotive").
+local ROLLING_STOCK_TYPES = {"locomotive", "cargo-wagon", "fluid-wagon", "artillery-wagon"}
 
 -- Alerte de proximite : un train EN MOUVEMENT dans un rayon serre autour du
 -- joueur (voir TRAIN_PROXIMITY_RADIUS) -- pense pour prevenir avant de se
@@ -152,18 +169,18 @@ local function count_nearby_moving_train(player)
   if player.vehicle and player.vehicle.train then return counts end
 
   local seen_trains = {}
-  local ok, locomotives = pcall(function()
+  local ok, rolling_stock = pcall(function()
     return player.surface.find_entities_filtered{
       position = player.character.position,
       radius = TRAIN_PROXIMITY_RADIUS,
-      type = "locomotive",
+      type = ROLLING_STOCK_TYPES,
       force = "player",
     }
   end)
   if not ok then return counts end
 
-  for _, loco in pairs(locomotives) do
-    local train = loco.valid and loco.train
+  for _, car in pairs(rolling_stock) do
+    local train = car.valid and car.train
     if train and train.valid and train.speed ~= 0 and not seen_trains[train.id] then
       seen_trains[train.id] = true
       counts.train_nearby = counts.train_nearby + 1

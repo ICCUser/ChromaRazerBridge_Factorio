@@ -551,7 +551,7 @@ local function add_color_picker_widgets(parent, prefix, color)
   rgb_flow.add{type = "label", name = prefix .. "_preview", caption = color_swatch_caption(color, 6)}
 end
 
-function build_research_bar_editor(player)
+local function build_research_bar_editor(player)
   local window = player.gui.screen.chroma_research_window
   if not window then return end
   window.clear()
@@ -607,7 +607,7 @@ end
 -- Meme principe que la barre de recherche, dupplique plutot que factorise
 -- pour eviter de fragiliser le code deja teste de l'editeur de recherche.
 
-function build_health_bar_editor(player)
+local function build_health_bar_editor(player)
   local window = player.gui.screen.chroma_health_window
   if not window then return end
   window.clear()
@@ -663,7 +663,7 @@ end
 -- Couleur affichee sur TOUTES les touches quand rien d'autre n'est actif
 -- (pas de recherche, pas de barre de vie, pas d'alerte clavier).
 
-function build_default_color_editor(player)
+local function build_default_color_editor(player)
   local window = player.gui.screen.chroma_default_window
   if not window then return end
   window.clear()

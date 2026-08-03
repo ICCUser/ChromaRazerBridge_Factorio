@@ -31,6 +31,7 @@ ALERTS_CATALOG = [
     ("turret_fire", "Une tourelle du joueur tire"),
     ("no_power", "[Synthetique] Entite(s) sans courant du tout, autour du joueur"),
     ("low_power", "[Synthetique] Entite(s) en sous-alimentation electrique, autour du joueur"),
+    ("train_nearby", "[Synthetique] Train en mouvement a proximite immediate du joueur"),
     ("entity_destroyed", "Une entite du joueur a ete detruite"),
     ("train_no_path", "Un train n'a plus de chemin possible"),
     ("train_out_of_fuel", "Un train est a court de carburant"),
@@ -97,7 +98,13 @@ def main():
     print_table("Alertes continues (chroma_status.json / alerts_by_type)", ALERTS_CATALOG, mapping.get("alerts", {}), layout)
 
     unknown_events = set(mapping.get("events", {})) - {n for n, _ in EVENTS_CATALOG}
-    unknown_alerts = set(mapping.get("alerts", {})) - {n for n, _ in ALERTS_CATALOG}
+    # "custom_<id>" : alertes personnalisees (haut-parleurs programmables, voir
+    # gui.lua/custom_alert_watches), un identifiant different par joueur -- pas
+    # dans ALERTS_CATALOG par nature, ce n'est pas une entree inconnue/orpheline.
+    unknown_alerts = {
+        name for name in mapping.get("alerts", {})
+        if name not in {n for n, _ in ALERTS_CATALOG} and not (name.startswith("custom_") and name[7:].isdigit())
+    }
     if unknown_events:
         print(f"\nAttention : evenements configures mais inconnus du mod : {sorted(unknown_events)}")
     if unknown_alerts:

@@ -84,24 +84,17 @@ QWERTY_US = {label: _rzkey_to_rowcol(value) for label, value in _RZKEY.items()}
 # --- Layout AZERTY (France) ---
 # On part de QWERTY_US et on ne change QUE les touches dont le libelle
 # imprime differe sur un clavier francais (la position physique reste la
-# meme, seul le nom sous lequel on la designe change).
-_AZERTY_RELABEL = {
-    # rangee du haut : A et Z prennent la place de Q et W
-    "Q": "A", "W": "Z",
-    # rangee du milieu : Q prend la place de A, M prend la place de ;,
-    # ; et ' remplaces (approx, ponctuation FR non geree finement ici)
-    "A": "Q", "SEMICOLON": "M",
-    # rangee du bas : W prend la place de Z, , et ; et : remplacent M , . /
-    "Z": "W", "M": "COMMA_FR", "COMMA": "SEMICOLON_FR", "PERIOD": "COLON_FR", "SLASH": "EXCLAIM_FR",
-}
+# meme, seul le nom sous lequel on la designe change) :
+#   rangee du haut : A et Z prennent la place de Q et W
+#   rangee du milieu : Q prend la place de A, M prend la place de ;
+#   rangee du bas : W prend la place de Z, , ; et : remplacent M , . /
+# (approx, ponctuation FR non geree finement ici)
 
 
 def _build_azerty():
     azerty = dict(QWERTY_US)
-    for old_label, new_label in _AZERTY_RELABEL.items():
-        azerty[new_label] = QWERTY_US[old_label]
-    # les libelles QWERTY qui n'ont plus de sens en AZERTY sont retires pour
-    # eviter toute confusion (ex: "A" en QWERTY == "Q" en AZERTY)
+    # libelles QWERTY qui n'ont plus de sens une fois renommes en AZERTY
+    # (ex: "A" en QWERTY == "Q" en AZERTY, la position physique de Q)
     for old_label in ("Q", "W", "A", "Z", "SEMICOLON", "M", "COMMA", "PERIOD", "SLASH"):
         azerty.pop(old_label, None)
     azerty.update({

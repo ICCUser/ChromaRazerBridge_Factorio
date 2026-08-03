@@ -23,24 +23,6 @@ def single_key_grid(row: int, col: int, rgb, ambient_rgb=(0, 0, 0)):
     return grid
 
 
-def multi_key_grid(positions, rgb, ambient_rgb=(0, 0, 0)):
-    """Grille avec plusieurs touches allumees a la meme couleur (mapping par zone)."""
-    grid = blank_grid(ambient_rgb)
-    color = rgb_to_chroma(*rgb)
-    for row, col in positions:
-        grid[row][col] = color
-    return grid
-
-
-def sweep_column_grid(active_column: int, base_rgb, ambient_rgb=(0, 0, 0)):
-    """Grille avec une seule colonne allumee (utilisee pour l'animation de boot)."""
-    grid = blank_grid(ambient_rgb)
-    color = rgb_to_chroma(*base_rgb)
-    for r in range(ROWS):
-        grid[r][active_column] = color
-    return grid
-
-
 def sweep_fill_grid(up_to_column: int, base_rgb, ambient_rgb=(0, 0, 0)):
     """Grille avec toutes les colonnes jusqu'a 'up_to_column' allumees (barre qui se remplit)."""
     grid = blank_grid(ambient_rgb)
