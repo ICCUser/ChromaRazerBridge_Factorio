@@ -64,7 +64,7 @@ diagnostic hors Factorio via `diagnose.py`, etc.).
 ### Etapes
 
 1. **Copier le mod** : copie le dossier `mod/` de ce repo dans `%APPDATA%\Factorio\mods\`
-   en le renommant `chroma-bridge_1.5.1` (le nom du dossier de developpement
+   en le renommant `chroma-bridge_1.5.2` (le nom du dossier de developpement
    n'a pas d'importance pour Factorio, seul `info.json` compte, mais ca evite
    toute confusion). Verifie qu'il apparait et est active dans le launcher
    Factorio (liste des mods).
