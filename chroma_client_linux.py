@@ -50,12 +50,17 @@ class ChromaClient:
     """Meme interface que chroma_client.ChromaClient, implementee au-dessus
     d'OpenRazer plutot que du SDK REST Synapse (Windows uniquement)."""
 
-    def __init__(self, app_name="Factorio Chroma Bridge", author="ICCUser", contact="none@example.com"):
+    def __init__(self, app_name="Factorio Chroma Bridge", author="Ibalek", contact="none@example.com"):
         # author/contact : uniquement utilises comme metadonnees de session
         # par le SDK REST Windows, ignores ici (OpenRazer n'a pas ce concept).
         self.app_name = app_name
         self._manager = None
         self._devices_by_name = {}
+        self._last_effect = {}  # device -> derniere commande envoyee, pour eviter de
+                                 # relancer un effet deja actif (voir static()/breathing())
+        self.session_uri = None  # pas de notion de session cote OpenRazer ; presente
+                                  # uniquement pour l'interface commune avec chroma_client.py
+                                  # (main.py/diagnose.py l'affichent apres connect())
 
     def connect(self):
         self._manager = DeviceManager()
@@ -68,6 +73,7 @@ class ChromaClient:
                     self._devices_by_name[our_name] = device
 
         found = ", ".join(self._devices_by_name.keys()) or "aucun"
+        self.session_uri = f"openrazer (local dbus) : {found}"
         print(f"[chroma_client_linux] Peripheriques OpenRazer detectes : {found}")
         return self._manager
 
@@ -78,8 +84,19 @@ class ChromaClient:
         d = self._device(device)
         if not d:
             return
+        effect = ("static", tuple(rgb))
+        previous = self._last_effect.get(device)
+        if previous == effect:
+            return
         try:
+            if previous is not None and previous[0] != "static":
+                # Coupe l'effet precedent (respiration ambiante, etc.) avant
+                # d'envoyer le static : certains firmwares Razer enchainent
+                # les effets avec un fondu interne, "none" force une coupure
+                # nette plutot qu'un crossfade visible sur l'alerte.
+                d.fx.none()
             d.fx.static(*rgb)
+            self._last_effect[device] = effect
         except Exception as exc:
             print(f"[chroma_client_linux] {device} <- static : erreur : {exc}")
 
@@ -87,11 +104,15 @@ class ChromaClient:
         d = self._device(device)
         if not d:
             return
+        effect = ("breathing", tuple(rgb1), tuple(rgb2) if rgb2 else None)
+        if self._last_effect.get(device) == effect:
+            return
         try:
             if rgb2:
                 d.fx.breath_dual(rgb1[0], rgb1[1], rgb1[2], rgb2[0], rgb2[1], rgb2[2])
             else:
                 d.fx.breath_single(*rgb1)
+            self._last_effect[device] = effect
         except Exception as exc:
             print(f"[chroma_client_linux] {device} <- breathing : erreur : {exc}")
 
@@ -110,6 +131,8 @@ class ChromaClient:
                 for col in range(cols):
                     adv.matrix[row, col] = _chroma_to_rgb(grid[row][col])
             adv.draw()
+            self._last_effect.pop("keyboard", None)  # effet matrice : le prochain
+                                                       # static()/breathing() doit reprendre la main
         except Exception as exc:
             print(f"[chroma_client_linux] keyboard <- custom_keyboard : erreur : {exc}")
 
@@ -123,9 +146,11 @@ class ChromaClient:
 
     def close(self):
         # Pas de notion de session a fermer explicitement comme le SDK REST
-        # Windows -- on eteint juste chaque peripherique proprement.
+        # Windows -- a la fermeture du bridge (jeu ferme, Ctrl+C...), on
+        # remet chaque peripherique en vert fixe plutot que de l'eteindre :
+        # ca reste un etat visuel clair (le clavier n'a pas l'air en panne).
         for device in self._devices_by_name.values():
             try:
-                device.fx.none()
+                device.fx.static(0, 255, 0)
             except Exception:
                 pass

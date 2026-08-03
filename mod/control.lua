@@ -1,7 +1,10 @@
 -- Chroma Bridge - control.lua
 -- Ecrit dans script-output/ :
 --   chroma_status.json    -> etat continu (ecrase a chaque tick de polling)
---   chroma_events.jsonl   -> evenements discrets (une ligne JSON ajoutee par evenement)
+--   chroma_events.jsonl   -> evenements discrets (une ligne JSON ajoutee par evenement,
+--                            vide en debut de session PUIS periodiquement (voir
+--                            EVENTS_RESET_INTERVAL_TICKS) pour ne pas grossir sans fin
+--                            sur une session tres longue -- voir plus bas)
 --   chroma_mapping.json   -> config appareil/touche/couleur/clignotement editee
 --                            depuis l'interface en jeu (CONTROL+SHIFT+C), voir gui.lua
 --
@@ -10,9 +13,16 @@
 
 local util = require("util")
 local gui = require("gui")
+local event_explorer = require("event_explorer")
 
 local POLL_INTERVAL_TICKS = 60 -- 1x par seconde (60 ticks = 1s a vitesse normale)
+local TRAIN_SCAN_INTERVAL_TICKS = 6 -- ~0.1s : alerte de securite, doit reagir plus vite que le statut general
 local CRAFT_EVENT_MIN_INTERVAL = 30 -- ticks (~0.5s) entre deux "item_crafted" pour eviter le spam
+local EVENTS_RESET_INTERVAL_TICKS = 60 * 60 * 10 -- ~10 min a vitesse normale : purge periodique de
+                                                  -- chroma_events.jsonl (seul fichier en ecriture
+                                                  -- "append") pour qu'une session tres longue (8h+,
+                                                  -- AFK/craft en masse) ne le fasse pas grossir sans
+                                                  -- fin entre deux purges de debut de session
 
 -- Table inversee id -> nom, construite une seule fois, pour retrouver le nom
 -- lisible (ex: "no_storage") a partir de l'id renvoye par player.get_alerts().
@@ -23,6 +33,47 @@ end
 
 local last_craft_event_tick = 0
 local POWER_SCAN_RADIUS = 150 -- tuiles autour de chaque joueur connecte (pas toute la base, pour les perfs)
+local TRAIN_PROXIMITY_RADIUS = 15 -- bien plus serre que POWER_SCAN_RADIUS : "danger immediat", pas "quelque part dans la base"
+
+-- Compteurs par mod pour l'explorateur d'evenements (storage.chroma_mod_counts
+-- [event_ou_alerte][nom_du_mod] = nombre de fois vu), partages pour toute
+-- l'equipe -- c'est juste de la stat d'exploration, pas une config perso.
+local function record_mod_count(key, mod_name)
+  if not key then return end
+  storage.chroma_mod_counts = storage.chroma_mod_counts or {}
+  storage.chroma_mod_counts[key] = storage.chroma_mod_counts[key] or {}
+  storage.chroma_mod_counts[key][mod_name] = (storage.chroma_mod_counts[key][mod_name] or 0) + 1
+end
+
+-- Compare le message de chaque alerte "custom" (haut-parleur programmable,
+-- case "Alerte" + texte libre) au match_text de chaque watch defini par CE
+-- joueur (storage.player_mappings[...].custom_alert_watches, voir gui.lua).
+-- Alimente alerts_by_type sous la cle "custom_<id>" pour reutiliser tel quel
+-- l'editeur d'alertes existant (couleur/device/priorite generiques).
+local function count_custom_alert_watches(player, alerts)
+  local counts = {}
+  local mapping = gui.player_mapping(player)
+  local watches = mapping and mapping.custom_alert_watches
+  if not watches or #watches == 0 then return counts end
+  for _, by_type in pairs(alerts) do
+    local list = by_type[defines.alert_type.custom]
+    if list then
+      for _, alert_data in pairs(list) do
+        local ok, text = pcall(tostring, alert_data.message)
+        if ok and text and text ~= "" then
+          local lowered = text:lower()
+          for _, watch in ipairs(watches) do
+            if watch.match_text and watch.match_text ~= "" and lowered:find(watch.match_text:lower(), 1, true) then
+              local key = "custom_" .. watch.id
+              counts[key] = (counts[key] or 0) + 1
+            end
+          end
+        end
+      end
+    end
+  end
+  return counts
+end
 
 -- Emballe un gestionnaire d'evenement de GUI dans un pcall : une erreur dans
 -- l'interface (ex: nom de touche saisi bizarrement) ne doit jamais planter
@@ -36,47 +87,52 @@ local function safe_gui_handler(handler)
   end
 end
 
--- Compte, pour chaque type d'alerte (defines.alert_type), le nombre d'alertes
--- actives actuellement sur tous les joueurs connectes / toutes les surfaces.
-local function count_alerts_by_type()
+-- Compte, pour UN joueur donne, le nombre d'alertes actives par type
+-- (defines.alert_type).
+local function count_player_alerts(player)
   local counts = {}
-  for _, player in pairs(game.connected_players) do
-    local ok, alerts = pcall(function() return player.get_alerts{} end)
-    if ok and alerts then
-      for _, by_type in pairs(alerts) do
-        for alert_type_id, list in pairs(by_type) do
-          local name = ALERT_TYPE_NAMES[alert_type_id]
-          if name then
-            counts[name] = (counts[name] or 0) + #list
+  local ok, alerts = pcall(function() return player.get_alerts{} end)
+  if ok and alerts then
+    for _, by_type in pairs(alerts) do
+      for alert_type_id, list in pairs(by_type) do
+        local name = ALERT_TYPE_NAMES[alert_type_id]
+        if name then
+          counts[name] = (counts[name] or 0) + #list
+          for _, alert_data in pairs(list) do
+            local target = alert_data.target
+            if target and target.valid then
+              record_mod_count(name, event_explorer.mod_of(target.prototype))
+            end
           end
         end
       end
+    end
+    for key, n in pairs(count_custom_alert_watches(player, alerts)) do
+      counts[key] = (counts[key] or 0) + n
     end
   end
   return counts
 end
 
--- Compte, autour de chaque joueur connecte (rayon borne, pas toute la base),
--- les entites du joueur actuellement en sous-alimentation electrique.
--- Pas un alert_type natif de Factorio, donc compte a part et fusionne dans
--- alerts_by_type pour rester utilisable telle quelle par l'editeur d'alertes.
-local function count_power_issues()
+-- Compte, autour d'UN joueur donne (rayon borne, pas toute la base), ses
+-- entites actuellement en sous-alimentation electrique. Pas un alert_type
+-- natif de Factorio, donc compte a part et fusionne dans alerts_by_type pour
+-- rester utilisable telle quelle par l'editeur d'alertes.
+local function count_player_power_issues(player)
   local counts = {no_power = 0, low_power = 0}
-  for _, player in pairs(game.connected_players) do
-    if player.character then
-      local entities = player.surface.find_entities_filtered{
-        position = player.character.position,
-        radius = POWER_SCAN_RADIUS,
-        force = "player",
-      }
-      for _, entity in pairs(entities) do
-        local ok, status = pcall(function() return entity.status end)
-        if ok then
-          if status == defines.entity_status.no_power then
-            counts.no_power = counts.no_power + 1
-          elseif status == defines.entity_status.low_power then
-            counts.low_power = counts.low_power + 1
-          end
+  if player.character then
+    local entities = player.surface.find_entities_filtered{
+      position = player.character.position,
+      radius = POWER_SCAN_RADIUS,
+      force = "player",
+    }
+    for _, entity in pairs(entities) do
+      local ok, status = pcall(function() return entity.status end)
+      if ok then
+        if status == defines.entity_status.no_power then
+          counts.no_power = counts.no_power + 1
+        elseif status == defines.entity_status.low_power then
+          counts.low_power = counts.low_power + 1
         end
       end
     end
@@ -84,57 +140,138 @@ local function count_power_issues()
   return counts
 end
 
--- Etat continu : evolution biters, recherche en cours, alertes par type,
--- vie du joueur, pollution locale, heure du jour.
+-- Alerte de proximite : un train EN MOUVEMENT dans un rayon serre autour du
+-- joueur (voir TRAIN_PROXIMITY_RADIUS) -- pense pour prevenir avant de se
+-- faire percuter en traversant une voie, pas pour signaler "il y a un train
+-- dans le coin". On ignore volontairement notre propre convoi (si le joueur
+-- est lui-meme a bord d'un train, .train existe sur son vehicule) : sinon
+-- l'alerte resterait allumee en permanence pendant tout trajet en train.
+local function count_nearby_moving_train(player)
+  local counts = {train_nearby = 0}
+  if not player.character then return counts end
+  if player.vehicle and player.vehicle.train then return counts end
+
+  local seen_trains = {}
+  local ok, locomotives = pcall(function()
+    return player.surface.find_entities_filtered{
+      position = player.character.position,
+      radius = TRAIN_PROXIMITY_RADIUS,
+      type = "locomotive",
+      force = "player",
+    }
+  end)
+  if not ok then return counts end
+
+  for _, loco in pairs(locomotives) do
+    local train = loco.valid and loco.train
+    if train and train.valid and train.speed ~= 0 and not seen_trains[train.id] then
+      seen_trains[train.id] = true
+      counts.train_nearby = counts.train_nearby + 1
+    end
+  end
+  return counts
+end
+
+-- Ecrit train_nearby dans son propre petit fichier, cible sur la machine de
+-- CE joueur, a un rythme bien plus rapide (TRAIN_SCAN_INTERVAL_TICKS) que le
+-- reste du statut (POLL_INTERVAL_TICKS, 1x/seconde) -- sinon on garde jusqu'a
+-- 1s de retard entre le train qui entre dans le rayon et l'alerte qui
+-- s'allume, trop lent pour un avertissement de securite. factorio_watcher.py
+-- (cote bridge) lit ce fichier en plus de chroma_player_status.json et
+-- fusionne sa valeur dans alerts_by_type.
+script.on_nth_tick(TRAIN_SCAN_INTERVAL_TICKS, function()
+  for _, player in pairs(game.connected_players) do
+    local ok, counts = pcall(count_nearby_moving_train, player)
+    if ok then
+      util.safe_write_json("chroma_train_proximity.json", counts, false, player.index)
+    end
+  end
+end)
+
+-- Etat partage (propriete de la FORCE, identique pour toute l'equipe --
+-- evolution biters, recherche en cours) : un seul fichier, ecrit sans
+-- player_index cible, donc visible chez tout le monde (comme avant).
+--
+-- Etat individuel (alertes, vie, pollution locale, heure du jour -- propres
+-- a CHAQUE joueur) : ecrit avec player_index cible, donc chaque fichier
+-- n'atterrit QUE sur la machine du joueur concerne (voir
+-- util.safe_write_json et gui.write_mapping_file, meme mecanisme).
 local function write_status()
   local force = game.forces["player"]
-  local alerts_by_type = count_alerts_by_type()
-  local power_issues = count_power_issues()
-  alerts_by_type.no_power = power_issues.no_power
-  alerts_by_type.low_power = power_issues.low_power
 
-  local player_health = nil
-  local local_pollution = 0
-  local daytime = nil
-  for _, player in pairs(game.connected_players) do
-    if player.character then
-      local character = player.character
-      player_health = character.health / character.prototype.get_max_health()
-      local_pollution = player.surface.get_pollution(character.position)
-      daytime = player.surface.daytime
-    end
-    break -- un seul joueur de reference (parties solo typiquement)
-  end
-
-  local status = {
+  local shared_status = {
     tick = game.tick,
     evolution_factor = force.get_evolution_factor(),
-    alerts_by_type = alerts_by_type,
-    attack_alerts = (alerts_by_type["entity_under_attack"] or 0) + (alerts_by_type["turret_fire"] or 0),
-    player_health = player_health,
-    local_pollution = local_pollution,
-    daytime = daytime,
   }
-
   if force.current_research then
-    status.current_research = force.current_research.name
-    status.research_progress = force.research_progress
+    shared_status.current_research = force.current_research.name
+    shared_status.research_progress = force.research_progress
+  end
+  util.safe_write_json("chroma_status.json", shared_status, false)
+
+  for _, player in pairs(game.connected_players) do
+    local alerts_by_type = count_player_alerts(player)
+    local power_issues = count_player_power_issues(player)
+    alerts_by_type.no_power = power_issues.no_power
+    alerts_by_type.low_power = power_issues.low_power
+    -- train_nearby n'est PAS recalcule ici : le scan dedie (TRAIN_SCAN_INTERVAL_TICKS,
+    -- plus haut) l'ecrit deja a un rythme plus rapide dans son propre fichier.
+
+    local player_health = nil
+    local local_pollution = 0
+    if player.character then
+      player_health = player.character.health / player.character.prototype.get_max_health()
+      local_pollution = player.surface.get_pollution(player.character.position)
+    end
+
+    local player_status = {
+      alerts_by_type = alerts_by_type,
+      attack_alerts = (alerts_by_type["entity_under_attack"] or 0) + (alerts_by_type["turret_fire"] or 0),
+      player_health = player_health,
+      local_pollution = local_pollution,
+      daytime = player.surface.daytime,
+    }
+    util.safe_write_json("chroma_player_status.json", player_status, false, player.index)
   end
 
-  util.safe_write_json("chroma_status.json", status, false)
   -- Recree les champs manquants (health_bar, keyboard_idle, ...) sur les
   -- parties commencees avant leur ajout : on_configuration_changed ne se
   -- redeclenche pas juste parce qu'on a modifie les fichiers du mod sans
   -- changer sa version, donc la migration doit pouvoir tourner ici aussi.
   gui.init_defaults()
-  gui.ensure_mapping_file()
+  gui.ensure_mapping_files()
 end
 
+-- chroma_events.jsonl est en ecriture "append" (voir les script.on_event
+-- plus bas) : sans purge, il grossit indefiniment d'une session a l'autre,
+-- et un bridge redemarre en cours de partie relirait tout l'historique
+-- depuis le debut (voir factorio_watcher.py cote Python, qui se protege
+-- desormais aussi de son cote). "session_events_reset" est un upvalue Lua
+-- simple (PAS dans storage, qui est sauvegarde avec la partie) : il repart
+-- a false a chaque (re)chargement de la partie, donc ce bloc ne s'execute
+-- qu'une fois par lancement, au premier tick de poll.
+local session_events_reset = false
+
 script.on_nth_tick(POLL_INTERVAL_TICKS, function()
+  if not session_events_reset then
+    session_events_reset = true
+    util.reset_file("chroma_events.jsonl")
+  end
   local ok, err = pcall(write_status)
   if not ok then
     log("[chroma-bridge] erreur dans write_status, ignoree : " .. tostring(err))
   end
+end)
+
+-- Purge periodique en plus de celle de debut de session (voir
+-- EVENTS_RESET_INTERVAL_TICKS) : sur une session de plusieurs heures, le
+-- fichier ne doit jamais accumuler plus de ~10 min d'evenements avant d'etre
+-- vide. game.tick continue a compter d'une session a l'autre (persiste avec
+-- la partie), donc on_nth_tick reste aligne sur des intervalles reguliers de
+-- temps de jeu reellement ecoule, independamment du moment ou la partie a
+-- ete (re)chargee.
+script.on_nth_tick(EVENTS_RESET_INTERVAL_TICKS, function()
+  util.reset_file("chroma_events.jsonl")
 end)
 
 -- Evenement : recherche terminee
@@ -144,6 +281,7 @@ script.on_event(defines.events.on_research_finished, function(event)
     tick = game.tick,
     research = event.research.name,
   }, true)
+  record_mod_count("research_finished", event_explorer.mod_of(event.research))
 end)
 
 -- Evenement : entite du joueur endommagee (attaque de biters typiquement)
@@ -155,6 +293,7 @@ script.on_event(defines.events.on_entity_damaged, function(event)
         tick = game.tick,
         entity = event.entity.name,
       }, true)
+      record_mod_count("base_under_attack", event_explorer.mod_of(event.entity.prototype))
     end
   end
 end)
@@ -165,6 +304,8 @@ script.on_event(defines.events.on_rocket_launched, function(event)
     type = "rocket_launched",
     tick = game.tick,
   }, true)
+  local silo_or_rocket = event.rocket_silo or event.rocket
+  record_mod_count("rocket_launched", event_explorer.mod_of(silo_or_rocket and silo_or_rocket.prototype))
 end)
 
 -- Evenement : joueur mort
@@ -173,6 +314,7 @@ script.on_event(defines.events.on_player_died, function(event)
     type = "player_died",
     tick = game.tick,
   }, true)
+  record_mod_count("player_died", event_explorer.mod_of(event.cause and event.cause.prototype))
 end)
 
 -- Evenement : train arrive a quai
@@ -184,6 +326,7 @@ script.on_event(defines.events.on_train_changed_state, function(event)
       tick = game.tick,
       station = train.station and train.station.backer_name or nil,
     }, true)
+    record_mod_count("train_arrived", event_explorer.mod_of(train.station and train.station.prototype))
   end
 end)
 
@@ -199,6 +342,8 @@ script.on_event(defines.events.on_player_crafted_item, function(event)
     tick = game.tick,
     item = event.item_stack and event.item_stack.valid and event.item_stack.name or nil,
   }, true)
+  local stack = event.item_stack
+  record_mod_count("item_crafted", event_explorer.mod_of(stack and stack.valid and stack.prototype))
 end)
 
 -- --- Interface de configuration en jeu (gui.lua) ---

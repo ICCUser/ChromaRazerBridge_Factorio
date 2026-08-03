@@ -31,6 +31,7 @@ Prerequis (Linux) :
   Voir README.md pour le detail et les limites connues (code non teste).
 """
 
+import signal
 import sys
 import time
 
@@ -189,8 +190,8 @@ def build_keyboard_grid(status: dict, mapping: MappingStore, layout: str, keyboa
     if not any(layers):
         return None
 
-    idle_cfg = mapping["keyboard_idle"]
-    idle_rgb = breathing_color(now, _rgb(idle_cfg.get("color1")), _rgb(idle_cfg.get("color2"), (0, 0, 0)))
+    color1, color2 = keyboard_idle_colors(status, mapping)
+    idle_rgb = breathing_color(now, color1, color2)
     grid = blank_grid(idle_rgb)
     for layer in layers:
         for row, col, color in layer:
@@ -198,8 +199,9 @@ def build_keyboard_grid(status: dict, mapping: MappingStore, layout: str, keyboa
     return grid
 
 
-def compute_keyboard_idle(client: ChromaClient, cfg: dict):
-    client.breathing("keyboard", _rgb(cfg.get("color1")), _rgb(cfg.get("color2"), (0, 0, 0)))
+def compute_keyboard_idle(client: ChromaClient, status: dict, mapping: MappingStore):
+    color1, color2 = keyboard_idle_colors(status, mapping)
+    client.breathing("keyboard", color1, color2)
 
 
 def _threshold_matches(threshold: dict, status: dict) -> bool:
@@ -227,6 +229,21 @@ def ambient_colors_for(cfg: dict, status: dict):
     return color1, color2
 
 
+def keyboard_idle_colors(status: dict, mapping: MappingStore):
+    """Couleurs (color1, color2) de la respiration idle du clavier : reactives
+    a l'etat de la partie (mêmes seuils que mouse/chromalink) si active soit
+    depuis le jeu (case a cocher dans "Couleur par defaut", CONTROL+SHIFT+C,
+    -> keyboard_idle.ambient_reactive) soit a la main en ajoutant 'keyboard'
+    a ambient.devices dans mapping.json ; sinon la couleur fixe de
+    keyboard_idle."""
+    ambient_cfg = mapping["ambient"]
+    idle_cfg = mapping["keyboard_idle"]
+    reactive = idle_cfg.get("ambient_reactive", False) or "keyboard" in ambient_cfg.get("devices", [])
+    if reactive:
+        return ambient_colors_for(ambient_cfg, status)
+    return _rgb(idle_cfg.get("color1")), _rgb(idle_cfg.get("color2"), (0, 0, 0))
+
+
 def render_device_lane(client: ChromaClient, device: str, hold_state: dict, alerts_cfg: dict,
                         status: dict, ambient_cfg: dict, now: float):
     """Rendu independant pour la souris ou le tapis : evenement ponctuel en
@@ -247,7 +264,16 @@ def render_device_lane(client: ChromaClient, device: str, hold_state: dict, aler
         client.breathing(device, color1, color2)
 
 
+def _on_sigterm(signum, frame):
+    # chroma_bridge_watcher.sh arrete le bridge avec un simple `kill` (SIGTERM)
+    # quand Factorio se ferme. Sans ce handler, Python termine le processus
+    # au niveau OS sans jamais executer le `finally` plus bas -- le clavier
+    # ne repasserait jamais en vert fixe.
+    raise SystemExit(0)
+
+
 def main():
+    signal.signal(signal.SIGTERM, _on_sigterm)
     mapping = MappingStore()
 
     client = ChromaClient()
@@ -335,10 +361,10 @@ def main():
                 if grid is not None:
                     client.custom_keyboard(grid)
                 else:
-                    compute_keyboard_idle(client, mapping["keyboard_idle"])
+                    compute_keyboard_idle(client, status, mapping)
 
             time.sleep(mapping.get("poll_seconds", 0.2))
-    except KeyboardInterrupt:
+    except (KeyboardInterrupt, SystemExit):
         print("Arret demande, fermeture de la session Chroma...")
     finally:
         client.close()

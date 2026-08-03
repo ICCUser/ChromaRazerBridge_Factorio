@@ -1,9 +1,9 @@
 {
   "layout": "azerty_fr",
-  "poll_seconds": 0.2,
+  "poll_seconds": 0.1,
 
   "ambient": {
-    "devices": ["mouse", "chromalink"],
+    "devices": ["mouse", "chromalink", "keyboard"],
     "color1": [230, 100, 20],
     "color2": [20, 10, 0],
     "thresholds": [

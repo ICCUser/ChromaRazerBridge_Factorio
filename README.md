@@ -23,7 +23,7 @@ Deux morceaux, obligatoirement separes (voir "Pourquoi deux morceaux ?" plus bas
 ### Etapes
 
 1. **Copier le mod** : copie le dossier `mod/` de ce repo dans `%APPDATA%\Factorio\mods\`
-   en le renommant `chroma-bridge_1.1.0` (le nom du dossier de developpement
+   en le renommant `chroma-bridge_1.4.1` (le nom du dossier de developpement
    n'a pas d'importance pour Factorio, seul `info.json` compte, mais ca evite
    toute confusion). Verifie qu'il apparait et est active dans le launcher
    Factorio (liste des mods).

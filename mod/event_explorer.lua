@@ -91,6 +91,32 @@ function explorer.build_catalog()
   return catalog
 end
 
+-- Extrait le nom interne du mod (ex: "pyalienlife") d'un chemin d'icone
+-- Factorio (toujours de la forme "__nom-du-mod__/graphics/..."), y compris
+-- "base"/"core" pour le vanilla -- c'est la seule info fiable qu'on a a
+-- l'execution pour retrouver le mod proprietaire d'un prototype (il n'existe
+-- pas d'API directe "quel mod a ajoute cette entite").
+function explorer.mod_of_icon(icon_path)
+  if type(icon_path) ~= "string" then return "inconnu" end
+  return icon_path:match("^__(.-)__") or "inconnu"
+end
+
+-- Marche pour une entite, un prototype, une technologie, un item stack...
+-- n'importe quel objet exposant .icon ou .icons (meme forme dans l'API
+-- Factorio pour tous ces types). pcall : certains objets n'exposent pas ces
+-- champs, ou sont invalides au moment de l'appel (entite detruite entre
+-- l'evenement et la lecture par exemple).
+function explorer.mod_of(obj)
+  local ok, icon = pcall(function()
+    if not obj then return nil end
+    if obj.icon then return obj.icon end
+    if obj.icons and obj.icons[1] then return obj.icons[1].icon end
+    return nil
+  end)
+  if not ok then return "inconnu" end
+  return explorer.mod_of_icon(icon)
+end
+
 function explorer.categories(catalog)
   local seen = {}
   local list = {}

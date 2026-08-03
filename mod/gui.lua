@@ -18,8 +18,20 @@ local _catalog_cache = nil
 
 local KEY_BUTTON_SIZE = 28
 
-local function current_layout_name()
-  return (storage.mapping.layout == "qwerty_us") and "qwerty_us" or "azerty_fr"
+local function player_mapping(player)
+  storage.player_mappings = storage.player_mappings or {}
+  return storage.player_mappings[player.name]
+end
+
+-- Expose au control.lua (count_custom_alert_watches) sans dupliquer l'acces
+-- a storage.player_mappings.
+function gui.player_mapping(player)
+  return player_mapping(player)
+end
+
+local function current_layout_name(player)
+  local mapping = player_mapping(player)
+  return (mapping and mapping.layout == "qwerty_us") and "qwerty_us" or "azerty_fr"
 end
 
 -- (ligne, colonne) -> nom de touche, pour le layout donne. Recalcule a
@@ -75,6 +87,7 @@ local ITEMS = {
   {section = "alerts", key = "no_material_for_construction", label = "[Alerte] Manque de materiaux"},
   {section = "alerts", key = "not_enough_construction_robots", label = "[Alerte] Manque de robots de construction"},
   {section = "alerts", key = "no_storage", label = "[Alerte] Stockage plein"},
+  {section = "alerts", key = "train_nearby", label = "[Alerte] Train en mouvement a proximite (danger)"},
 }
 
 local DEFAULT_MAPPING = {
@@ -114,6 +127,7 @@ local DEFAULT_MAPPING = {
     no_material_for_construction = {device = "keyboard", scope = "zone:movement", color = {255, 200, 0}, blink = false, priority = 5},
     not_enough_construction_robots = {device = "keyboard", scope = "zone:movement", color = {255, 200, 0}, blink = false, priority = 5},
     no_storage = {device = "keyboard", scope = "zone:movement", color = {255, 200, 0}, blink = false, priority = 5},
+    train_nearby = {device = "all", color = {255, 0, 0}, blink = true, blink_interval = 0.2, priority = 9},
   },
 }
 
@@ -126,52 +140,83 @@ local function deep_copy(tbl)
   return copy
 end
 
-local function write_mapping_file()
-  util.safe_write_json("chroma_mapping.json", storage.mapping, false)
-end
-
--- Reecrit chroma_mapping.json de maniere inconditionnelle. Un mod Lua ne
--- peut pas verifier si un fichier existe deja sur le disque (sandbox de
--- Factorio), donc on ne peut pas detecter qu'il a disparu -- on se contente
--- de le reecrire regulierement (control.lua l'appelle depuis write_status,
--- ~1x/seconde) pour s'auto-reparer si jamais le fichier est supprime/perdu
--- (ex: script-output vide entre deux sessions) sans que storage.mapping,
--- lui, ne soit affecte (il est sauvegarde avec la partie).
-function gui.ensure_mapping_file()
-  if storage.mapping then
-    write_mapping_file()
+-- Ecrit chroma_mapping.json en ciblant player.index : Factorio n'envoie ce
+-- fichier QUE sur la machine de ce joueur precis (sous-dossier prive), donc
+-- la config d'un joueur n'apparait jamais chez les autres. Voir
+-- util.safe_write_json.
+local function write_mapping_file(player)
+  local cfg = player_mapping(player)
+  if cfg then
+    util.safe_write_json("chroma_mapping.json", cfg, false, player.index)
   end
 end
 
+-- Reecrit chroma_mapping.json de maniere inconditionnelle, pour chaque
+-- joueur connecte. Un mod Lua ne peut pas verifier si un fichier existe deja
+-- sur le disque (sandbox de Factorio), donc on ne peut pas detecter qu'il a
+-- disparu -- on se contente de le reecrire regulierement (control.lua
+-- l'appelle depuis write_status, ~1x/seconde) pour s'auto-reparer si jamais
+-- le fichier est supprime/perdu (ex: script-output vide entre deux
+-- sessions) sans que storage.player_mappings, lui, ne soit affecte (il est
+-- sauvegarde avec la partie).
+function gui.ensure_mapping_files()
+  if not storage.player_mappings then return end
+  for _, player in pairs(game.connected_players) do
+    write_mapping_file(player)
+  end
+end
+
+-- Cree/migre la config individuelle de chaque joueur connecte. Si une
+-- ancienne config partagee existe (storage.mapping, d'avant le passage a
+-- une config par joueur), elle sert de point de depart -- personne ne perd
+-- ses reglages actuels au moment de la migration.
 function gui.init_defaults()
-  if not storage.mapping then
-    storage.mapping = deep_copy(DEFAULT_MAPPING)
-    write_mapping_file()
-  else
+  storage.player_mappings = storage.player_mappings or {}
+  local legacy_shared = storage.mapping
+
+  for _, player in pairs(game.connected_players) do
+    if not storage.player_mappings[player.name] then
+      storage.player_mappings[player.name] = deep_copy(legacy_shared or DEFAULT_MAPPING)
+    end
+    local pm = storage.player_mappings[player.name]
     -- migrations : parties commencees avant l'ajout de ces champs.
-    local changed = false
     for _, bar in ipairs({"research_bar", "health_bar", "keyboard_idle"}) do
-      if not storage.mapping[bar] then
-        storage.mapping[bar] = deep_copy(DEFAULT_MAPPING[bar])
-        changed = true
+      if not pm[bar] then
+        pm[bar] = deep_copy(DEFAULT_MAPPING[bar])
       end
     end
+    pm.alerts = pm.alerts or {}
     for name, cfg in pairs(DEFAULT_MAPPING.alerts) do
-      if not storage.mapping.alerts[name] then
-        storage.mapping.alerts[name] = deep_copy(cfg)
-        changed = true
+      if not pm.alerts[name] then
+        pm.alerts[name] = deep_copy(cfg)
       end
     end
-    if changed then
-      write_mapping_file()
-    end
+    pm.custom_alert_watches = pm.custom_alert_watches or {}
+    pm.next_watch_id = pm.next_watch_id or 1
   end
+
+  storage.mapping = nil -- migre vers storage.player_mappings, plus utilise
   storage.chroma_draft = storage.chroma_draft or {}
 end
 
-local function find_item(section, key)
+local function find_item(player, section, key)
   for _, item in ipairs(ITEMS) do
     if item.section == section and item.key == key then return item end
+  end
+  -- Pas dans la liste statique : c'est peut-etre une alerte personnalisee
+  -- (haut-parleur) ajoutee par ce joueur -- son libelle vit dans
+  -- custom_alert_watches, pas dans ITEMS.
+  if section == "alerts" and key:match("^custom_") then
+    local mapping = player_mapping(player)
+    local watches = mapping and mapping.custom_alert_watches
+    if watches then
+      for _, watch in ipairs(watches) do
+        if "custom_" .. watch.id == key then
+          local label = (watch.label ~= "" and watch.label) or watch.match_text
+          return {section = "alerts", key = key, label = "[Alerte perso] " .. label}
+        end
+      end
+    end
   end
   return nil
 end
@@ -221,7 +266,8 @@ local function zone_labels()
 end
 
 local function select_item(player, section, key)
-  local existing = storage.mapping[section] and storage.mapping[section][key]
+  local mapping = player_mapping(player)
+  local existing = mapping and mapping[section] and mapping[section][key]
   local cfg = existing and deep_copy(existing) or {device = "all", color = {255, 255, 255}, blink = false, blink_interval = 0.3}
   if cfg.enabled == nil then cfg.enabled = true end
   if section == "events" and cfg.hold == nil then cfg.hold = 2.0 end
@@ -243,7 +289,7 @@ local function set_visible(element, visible)
   if element and element.valid then element.visible = visible end
 end
 
-local function build_list(parent)
+local function build_list(parent, player)
   parent.clear()
   local current_section = nil
   for _, item in ipairs(ITEMS) do
@@ -260,6 +306,20 @@ local function build_list(parent)
       caption = item.label,
     }
   end
+
+  local mapping = player_mapping(player)
+  local watches = mapping and mapping.custom_alert_watches
+  if watches and #watches > 0 then
+    parent.add{type = "label", caption = "-- Alertes personnalisees --"}
+    for _, watch in ipairs(watches) do
+      local label = (watch.label ~= "" and watch.label) or watch.match_text
+      parent.add{
+        type = "button",
+        name = "chroma_select__alerts__custom_" .. watch.id,
+        caption = "[Alerte perso] " .. label,
+      }
+    end
+  end
 end
 
 local function build_detail(player)
@@ -275,7 +335,7 @@ local function build_detail(player)
   end
 
   local cfg = draft.cfg
-  local item = find_item(draft.section, draft.key)
+  local item = find_item(player, draft.section, draft.key)
 
   detail.add{type = "label", caption = (item and item.label or draft.key)}
 
@@ -391,7 +451,7 @@ local function build_keyboard_picker_grid(player)
   local grid = window.chroma_picker_grid
   grid.clear()
 
-  local by_pos = inverse_layout(current_layout_name())
+  local by_pos = inverse_layout(current_layout_name(player))
   local selection = storage.chroma_picker_selection[player.index]
 
   for row = 0, 5 do
@@ -532,7 +592,7 @@ function gui.toggle_research_bar_editor(player)
   end
 
   storage.chroma_research_draft = storage.chroma_research_draft or {}
-  storage.chroma_research_draft[player.index] = deep_copy(storage.mapping.research_bar)
+  storage.chroma_research_draft[player.index] = deep_copy(player_mapping(player).research_bar)
 
   local window = screen.add{
     type = "frame", name = "chroma_research_window", direction = "vertical",
@@ -588,7 +648,7 @@ function gui.toggle_health_bar_editor(player)
   end
 
   storage.chroma_health_draft = storage.chroma_health_draft or {}
-  storage.chroma_health_draft[player.index] = deep_copy(storage.mapping.health_bar)
+  storage.chroma_health_draft[player.index] = deep_copy(player_mapping(player).health_bar)
 
   local window = screen.add{
     type = "frame", name = "chroma_health_window", direction = "vertical",
@@ -617,6 +677,18 @@ function build_default_color_editor(player)
   add_color_picker_widgets(window, "chroma_kd_c2", draft.color2 or {20, 10, 0})
 
   window.add{type = "line"}
+  window.add{
+    type = "checkbox", name = "chroma_kd_ambient_checkbox",
+    caption = "Reactif a l'etat de la partie (evolution des biters, pollution, jour/nuit)",
+    state = draft.ambient_reactive or false,
+  }
+  window.add{
+    type = "label",
+    caption = "[color=150,150,150]Si coche, les deux couleurs ci-dessus sont ignorees : le clavier suit"
+      .. " automatiquement l'ambiance (rouge si evolution elevee, jaune si pollution forte, bleu la nuit...).[/color]",
+  }
+
+  window.add{type = "line"}
   local bottom = window.add{type = "flow", direction = "horizontal"}
   bottom.add{type = "button", name = "chroma_kd_apply_button", caption = "Appliquer"}
   bottom.add{type = "button", name = "chroma_kd_close_button", caption = "Fermer"}
@@ -630,7 +702,9 @@ function gui.toggle_default_color_editor(player)
   end
 
   storage.chroma_default_draft = storage.chroma_default_draft or {}
-  storage.chroma_default_draft[player.index] = deep_copy(storage.mapping.keyboard_idle)
+  local draft = deep_copy(player_mapping(player).keyboard_idle)
+  if draft.ambient_reactive == nil then draft.ambient_reactive = false end
+  storage.chroma_default_draft[player.index] = draft
 
   local window = screen.add{
     type = "frame", name = "chroma_default_window", direction = "vertical",
@@ -643,11 +717,28 @@ end
 
 -- --- Explorateur d'evenements (lecture seule) ---
 
-local function is_wired(entry)
+local function is_wired(entry, player)
   if entry.kind == "event" then
     return entry.wired_key ~= nil
   end
-  return storage.mapping.alerts[entry.name] ~= nil
+  local mapping = player_mapping(player)
+  return mapping and mapping.alerts[entry.name] ~= nil
+end
+
+-- Ventilation "vu depuis : base x12, pyalienlife x5" pour un event/alerte
+-- deja survenu cette partie -- lu en direct dans storage.chroma_mod_counts
+-- (alimente par control.lua) a chaque (re)construction de la liste, PAS
+-- fige dans _catalog_cache (qui lui reste statique, base sur defines.*).
+local function format_mod_counts(key)
+  local counts = key and storage.chroma_mod_counts and storage.chroma_mod_counts[key]
+  if not counts then return "" end
+  local parts = {}
+  for mod_name, n in pairs(counts) do
+    table.insert(parts, mod_name .. " x" .. n)
+  end
+  if #parts == 0 then return "" end
+  table.sort(parts)
+  return "  [color=150,150,150](vu depuis : " .. table.concat(parts, ", ") .. ")[/color]"
 end
 
 local function matches_explorer_filter(entry, search, category)
@@ -671,8 +762,9 @@ local function build_explorer_list(player)
       shown = shown + 1
       if shown <= MAX_SHOWN then
         local kind_label = (entry.kind == "event") and "[Event]" or "[Alerte]"
-        local caption = kind_label .. " " .. entry.name .. "  (" .. entry.category .. ")"
-        if is_wired(entry) then
+        local mod_counts_key = (entry.kind == "event") and entry.wired_key or entry.name
+        local caption = kind_label .. " " .. entry.name .. "  (" .. entry.category .. ")" .. format_mod_counts(mod_counts_key)
+        if is_wired(entry, player) then
           caption = "[color=0,255,120]OK[/color] " .. caption
           local wired_key = (entry.kind == "event") and entry.wired_key or entry.name
           list.add{
@@ -734,6 +826,70 @@ function gui.toggle_explorer(player)
   build_explorer_list(player)
 end
 
+-- --- Alertes personnalisees (haut-parleurs programmables) ---
+-- Onglet dedie pour ajouter/supprimer des "watches" : {id, label, match_text}.
+-- Une fois ajoutee, chaque watch apparait dans la liste principale
+-- (build_list, cle "custom_<id>") pour choisir couleur/device/priorite avec
+-- l'editeur d'alertes generique existant -- aucun code Python necessaire,
+-- count_custom_alert_watches (control.lua) alimente alerts_by_type comme
+-- n'importe quelle autre alerte.
+local function build_watches_editor(player)
+  local window = player.gui.screen.chroma_watches_window
+  if not window then return end
+  local list = window.chroma_watches_list
+  list.clear()
+
+  local draft = storage.chroma_watches_draft[player.index]
+  for i, watch in ipairs(draft) do
+    local row = list.add{type = "flow", name = "chroma_watch_row__" .. i, direction = "horizontal"}
+    row.add{type = "label", caption = "Nom :"}
+    row.add{type = "textfield", name = "chroma_watch_label__" .. i, text = watch.label or ""}
+    row.add{type = "label", caption = "Texte a detecter (message du haut-parleur) :"}
+    local match_field = row.add{type = "textfield", name = "chroma_watch_match__" .. i, text = watch.match_text or ""}
+    match_field.style.minimal_width = 200
+    row.add{type = "button", name = "chroma_watch_remove__" .. i, caption = "Supprimer"}
+  end
+
+  if #draft == 0 then
+    list.add{type = "label", caption = "(aucune alerte personnalisee pour l'instant)"}
+  end
+end
+
+function gui.toggle_watches_editor(player)
+  local screen = player.gui.screen
+  if screen.chroma_watches_window then
+    screen.chroma_watches_window.destroy()
+    return
+  end
+
+  storage.chroma_watches_draft = storage.chroma_watches_draft or {}
+  storage.chroma_watches_draft[player.index] = deep_copy(player_mapping(player).custom_alert_watches or {})
+
+  local window = screen.add{
+    type = "frame", name = "chroma_watches_window", direction = "vertical",
+    caption = "Chroma Bridge - Alertes personnalisees",
+  }
+  window.auto_center = true
+
+  window.add{
+    type = "label",
+    caption = "[color=150,150,150]Detecte le message d'un haut-parleur programmable (case 'Alerte' cochee + texte "
+      .. "libre, ex: 'Automall Frozen!!'). La correspondance ignore la casse et cherche le texte n'importe ou dans "
+      .. "le message. Une fois appliquee, la watch apparait dans Configuration pour choisir sa couleur.[/color]",
+  }
+
+  local list_scroll = window.add{type = "scroll-pane", name = "chroma_watches_list", direction = "vertical"}
+  list_scroll.style.minimal_width = 560
+  list_scroll.style.maximal_height = 300
+
+  local bottom = window.add{type = "flow", direction = "horizontal"}
+  bottom.add{type = "button", name = "chroma_watch_add_button", caption = "+ Ajouter une alerte"}
+  bottom.add{type = "button", name = "chroma_watches_apply_button", caption = "Appliquer"}
+  bottom.add{type = "button", name = "chroma_watches_close_button", caption = "Fermer"}
+
+  build_watches_editor(player)
+end
+
 function gui.toggle(player)
   local screen = player.gui.screen
   if screen.chroma_bridge_window then
@@ -748,7 +904,7 @@ function gui.toggle(player)
   local top = window.add{type = "flow", direction = "horizontal"}
   top.add{type = "label", caption = "Layout clavier :"}
   local layout_dd = top.add{type = "drop-down", name = "chroma_layout_dropdown", items = {"AZERTY (France)", "QWERTY (US)"}}
-  layout_dd.selected_index = (storage.mapping.layout == "qwerty_us") and 2 or 1
+  layout_dd.selected_index = (current_layout_name(player) == "qwerty_us") and 2 or 1
 
   local body = window.add{type = "flow", name = "chroma_body", direction = "horizontal"}
   body.style.horizontal_spacing = 12
@@ -756,7 +912,7 @@ function gui.toggle(player)
   local list_scroll = body.add{type = "scroll-pane", name = "chroma_list_scroll", direction = "vertical"}
   list_scroll.style.minimal_width = 280
   list_scroll.style.maximal_height = 480
-  build_list(list_scroll)
+  build_list(list_scroll, player)
 
   local detail = body.add{type = "flow", name = "chroma_detail_flow", direction = "vertical"}
   detail.style.minimal_width = 320
@@ -769,6 +925,7 @@ function gui.toggle(player)
   bottom.add{type = "button", name = "chroma_open_research_button", caption = "Barre de recherche"}
   bottom.add{type = "button", name = "chroma_open_health_button", caption = "Barre de vie"}
   bottom.add{type = "button", name = "chroma_open_default_button", caption = "Couleur par defaut"}
+  bottom.add{type = "button", name = "chroma_open_watches_button", caption = "Alertes personnalisees"}
 
   player.opened = window
 end
@@ -807,9 +964,10 @@ function gui.on_click(event)
   if name == "chroma_apply_button" then
     local draft = storage.chroma_draft[player.index]
     if draft then
-      storage.mapping[draft.section] = storage.mapping[draft.section] or {}
-      storage.mapping[draft.section][draft.key] = deep_copy(draft.cfg)
-      write_mapping_file()
+      local mapping = player_mapping(player)
+      mapping[draft.section] = mapping[draft.section] or {}
+      mapping[draft.section][draft.key] = deep_copy(draft.cfg)
+      write_mapping_file(player)
       player.print("Chroma Bridge : '" .. draft.key .. "' mis a jour.")
     end
     return
@@ -840,8 +998,8 @@ function gui.on_click(event)
   if name == "chroma_rb_apply_button" then
     local draft = storage.chroma_research_draft[player.index]
     if draft then
-      storage.mapping.research_bar = deep_copy(draft)
-      write_mapping_file()
+      player_mapping(player).research_bar = deep_copy(draft)
+      write_mapping_file(player)
       player.print("Chroma Bridge : barre de recherche mise a jour.")
     end
     return
@@ -887,8 +1045,8 @@ function gui.on_click(event)
   if name == "chroma_hb_apply_button" then
     local draft = storage.chroma_health_draft[player.index]
     if draft then
-      storage.mapping.health_bar = deep_copy(draft)
-      write_mapping_file()
+      player_mapping(player).health_bar = deep_copy(draft)
+      write_mapping_file(player)
       player.print("Chroma Bridge : barre de vie mise a jour.")
     end
     return
@@ -929,14 +1087,15 @@ function gui.on_click(event)
   if name == "chroma_kd_apply_button" then
     local draft = storage.chroma_default_draft[player.index]
     if draft then
-      storage.mapping.keyboard_idle = deep_copy(draft)
+      local mapping = player_mapping(player)
+      mapping.keyboard_idle = deep_copy(draft)
       -- Meme couleur par defaut pour la souris/le tapis (mapping.ambient,
       -- cote Python) : on ne touche que color1/color2 ici, pas
       -- devices/thresholds qui restent geres dans mapping.json.
-      storage.mapping.ambient = storage.mapping.ambient or {}
-      storage.mapping.ambient.color1 = deep_copy(draft.color1)
-      storage.mapping.ambient.color2 = deep_copy(draft.color2)
-      write_mapping_file()
+      mapping.ambient = mapping.ambient or {}
+      mapping.ambient.color1 = deep_copy(draft.color1)
+      mapping.ambient.color2 = deep_copy(draft.color2)
+      write_mapping_file(player)
       player.print("Chroma Bridge : couleur par defaut mise a jour.")
     end
     return
@@ -958,6 +1117,65 @@ function gui.on_click(event)
     if draft then
       draft.color2 = deep_copy(COLOR_PRESETS[tonumber(kd_c2_preset)])
       build_default_color_editor(player)
+    end
+    return
+  end
+
+  if name == "chroma_open_watches_button" then
+    gui.toggle_watches_editor(player)
+    return
+  end
+
+  if name == "chroma_watches_close_button" then
+    if player.gui.screen.chroma_watches_window then
+      player.gui.screen.chroma_watches_window.destroy()
+    end
+    return
+  end
+
+  if name == "chroma_watch_add_button" then
+    local draft = storage.chroma_watches_draft[player.index]
+    if draft then
+      local mapping = player_mapping(player)
+      local id = mapping.next_watch_id or 1
+      mapping.next_watch_id = id + 1
+      table.insert(draft, {id = id, label = "", match_text = ""})
+      build_watches_editor(player)
+    end
+    return
+  end
+
+  local remove_index = name:match("^chroma_watch_remove__(%d+)$")
+  if remove_index then
+    local draft = storage.chroma_watches_draft[player.index]
+    if draft then
+      table.remove(draft, tonumber(remove_index))
+      build_watches_editor(player)
+    end
+    return
+  end
+
+  if name == "chroma_watches_apply_button" then
+    local draft = storage.chroma_watches_draft[player.index]
+    if draft then
+      local mapping = player_mapping(player)
+      local kept_ids = {}
+      for _, watch in ipairs(draft) do
+        kept_ids["custom_" .. watch.id] = true
+      end
+      -- Nettoie les entrees alerts orphelines des watches supprimees --
+      -- sinon elles restent invisibles dans mapping.json indefiniment.
+      for key in pairs(mapping.alerts) do
+        if key:match("^custom_%d+$") and not kept_ids[key] then
+          mapping.alerts[key] = nil
+        end
+      end
+      mapping.custom_alert_watches = deep_copy(draft)
+      write_mapping_file(player)
+      player.print("Chroma Bridge : alertes personnalisees mises a jour.")
+      if player.gui.screen.chroma_bridge_window then
+        build_list(player.gui.screen.chroma_bridge_window.chroma_body.chroma_list_scroll, player)
+      end
     end
     return
   end
@@ -1036,7 +1254,7 @@ function gui.on_click(event)
 
   local prow, pcol = name:match("^chroma_picker_key__(%d+)__(%d+)$")
   if prow and pcol then
-    local by_pos = inverse_layout(current_layout_name())
+    local by_pos = inverse_layout(current_layout_name(player))
     local label = by_pos[prow .. ":" .. pcol]
     if label then
       local selection = storage.chroma_picker_selection[player.index]
@@ -1069,6 +1287,12 @@ function gui.on_checked_state_changed(event)
     return
   end
 
+  if element.name == "chroma_kd_ambient_checkbox" then
+    local kd_draft = storage.chroma_default_draft[player.index]
+    if kd_draft then kd_draft.ambient_reactive = element.state end
+    return
+  end
+
   local draft = storage.chroma_draft[player.index]
   if not draft then return end
 
@@ -1089,8 +1313,8 @@ function gui.on_selection_state_changed(event)
   local player = game.get_player(event.player_index)
 
   if element.name == "chroma_layout_dropdown" then
-    storage.mapping.layout = (element.selected_index == 2) and "qwerty_us" or "azerty_fr"
-    write_mapping_file()
+    player_mapping(player).layout = (element.selected_index == 2) and "qwerty_us" or "azerty_fr"
+    write_mapping_file(player)
     return
   end
 
@@ -1130,6 +1354,24 @@ function gui.on_text_changed(event)
   if element.name == "chroma_explorer_search" then
     storage.chroma_explorer_state[player.index].search = element.text
     build_explorer_list(player)
+    return
+  end
+
+  local watch_label_index = element.name:match("^chroma_watch_label__(%d+)$")
+  if watch_label_index then
+    local draft = storage.chroma_watches_draft[player.index]
+    if draft and draft[tonumber(watch_label_index)] then
+      draft[tonumber(watch_label_index)].label = element.text
+    end
+    return
+  end
+
+  local watch_match_index = element.name:match("^chroma_watch_match__(%d+)$")
+  if watch_match_index then
+    local draft = storage.chroma_watches_draft[player.index]
+    if draft and draft[tonumber(watch_match_index)] then
+      draft[tonumber(watch_match_index)].match_text = element.text
+    end
     return
   end
 

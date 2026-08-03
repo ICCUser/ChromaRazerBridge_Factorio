@@ -7,9 +7,14 @@ Lance-le pendant que Synapse tourne (Factorio n'a pas besoin d'etre ouvert) :
     python diagnose.py
 """
 
+import sys
 import time
 
-from chroma_client import ChromaClient, rainbow_color
+from chroma_client import rainbow_color
+if sys.platform.startswith("linux"):
+    from chroma_client_linux import ChromaClient
+else:
+    from chroma_client import ChromaClient
 
 client = ChromaClient(app_name="Chroma Bridge - Diagnostic")
 print("Connexion au Chroma SDK...")
@@ -21,7 +26,11 @@ client.static("mousepad", (255, 0, 0))
 time.sleep(3)
 
 print("1b) Tapis de souris en VIOLET via CHROMA_CUSTOM ('mousepad', 20 LEDs) pendant 3s...")
-client.custom_mousepad((200, 0, 255))
+if hasattr(client, "custom_mousepad"):
+    client.custom_mousepad((200, 0, 255))
+else:
+    print("   (custom_mousepad non supporte par ce client, teste comme 'static' a la place)")
+    client.static("mousepad", (200, 0, 255))
 time.sleep(3)
 
 print("1c) Tapis de souris en JAUNE via CHROMA_STATIC ('chromalink') pendant 3s...")
@@ -42,11 +51,12 @@ while time.time() - start < 6:
     client.static_all(rainbow_color(time.time()))
     time.sleep(0.05)
 
-print("5) Retour a l'ambiance normale (respiration orange)...")
+print("5) Retour a l'ambiance normale (respiration orange, 10s -- l'effet monte/descend")
+print("   lentement, laisse-lui le temps avant de conclure a un souci)...")
 client.breathing("chromalink", (230, 100, 20), (20, 10, 0))
 client.breathing("mouse", (230, 100, 20), (20, 10, 0))
 client.breathing("keyboard", (230, 100, 20), (20, 10, 0))
-time.sleep(3)
+time.sleep(10)
 
 client.close()
 print("\nTermine. Pour chaque etape, le bon appareil/couleur s'est-il bien affiche ?")

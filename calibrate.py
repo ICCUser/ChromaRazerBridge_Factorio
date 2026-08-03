@@ -24,7 +24,10 @@ import json
 import sys
 import time
 
-from chroma_client import ChromaClient
+if sys.platform.startswith("linux"):
+    from chroma_client_linux import ChromaClient
+else:
+    from chroma_client import ChromaClient
 from keyboard_grid import single_key_grid
 from keyboard_layout import LAYOUTS, OVERRIDES_PATH, key_to_rowcol
 
