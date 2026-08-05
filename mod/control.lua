@@ -42,7 +42,10 @@ local last_craft_event_tick = {} -- par joueur (event.player_index) : le seuil a
                                    -- (CRAFT_EVENT_MIN_INTERVAL) ne doit s'appliquer qu'a un
                                    -- meme joueur qui craft en rafale, pas empecher le craft
                                    -- d'un autre joueur juste parce que le premier vient d'agir
-local POWER_SCAN_RADIUS = 150 -- tuiles autour de chaque joueur connecte (pas toute la base, pour les perfs)
+local POWER_SCAN_RADIUS = 60 -- tuiles autour de chaque joueur connecte (pas toute la base, pour les perfs).
+                             -- 150 a l'origine : sur une base dense, le scan ramenait des milliers
+                             -- d'entites d'un coup et gelait la frame (~100 ms mesures) -- 60 suffit
+                             -- pour "ce qui manque de courant autour de moi"
 local TRAIN_PROXIMITY_RADIUS = 15 -- bien plus serre que POWER_SCAN_RADIUS : "danger immediat", pas "quelque part dans la base"
 
 -- Compteurs par mod pour l'explorateur d'evenements (storage.chroma_mod_counts
@@ -124,16 +127,15 @@ local function count_player_alerts(player)
   return counts
 end
 
--- Lecture de entity.status isolee dans une fonction nommee (definie une
--- seule fois) plutot qu'une fermeture ad hoc recreee a chaque entite : ce
--- scan tourne 1x/seconde par joueur connecte sur potentiellement des
--- centaines/milliers d'entites (voir POWER_SCAN_RADIUS), pas la peine
--- d'allouer une nouvelle closure a chaque iteration. pcall reste necessaire
--- : certains types d'entites renvoyees par le filtre (force = "player")
--- n'exposent pas .status de maniere fiable.
-local function read_entity_status(entity)
-  return entity.status
-end
+-- Seuls types scannes pour le statut electrique : les consommateurs qui
+-- peuvent vraiment passer en no_power/low_power. Sans ce filtre, le scan
+-- ramenait TOUTES les entites du rayon (belts, pipes, poteaux, rails...),
+-- soit des milliers de resultats inutiles sur une base dense -- c'etait la
+-- cause principale du gel d'une frame a chaque poll.
+local POWERED_ENTITY_TYPES = {
+  "assembling-machine", "furnace", "mining-drill", "inserter", "lab",
+  "pump", "beacon", "radar", "roboport",
+}
 
 -- Compte, autour d'UN joueur donne (rayon borne, pas toute la base), ses
 -- entites actuellement en sous-alimentation electrique. Pas un alert_type
@@ -145,16 +147,18 @@ local function count_player_power_issues(player)
     local entities = player.surface.find_entities_filtered{
       position = player.character.position,
       radius = POWER_SCAN_RADIUS,
+      type = POWERED_ENTITY_TYPES,
       force = "player",
     }
+    -- Plus de pcall par entite : tous les types de POWERED_ENTITY_TYPES
+    -- exposent .status (qui peut valoir nil, jamais une erreur), et un pcall
+    -- par entite etait un surcout mesurable a l'echelle du scan.
     for _, entity in pairs(entities) do
-      local ok, status = pcall(read_entity_status, entity)
-      if ok then
-        if status == defines.entity_status.no_power then
-          counts.no_power = counts.no_power + 1
-        elseif status == defines.entity_status.low_power then
-          counts.low_power = counts.low_power + 1
-        end
+      local status = entity.status
+      if status == defines.entity_status.no_power then
+        counts.no_power = counts.no_power + 1
+      elseif status == defines.entity_status.low_power then
+        counts.low_power = counts.low_power + 1
       end
     end
   end
