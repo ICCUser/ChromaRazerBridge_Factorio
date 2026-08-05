@@ -122,7 +122,19 @@ local function _get_alerts(player)
 end
 
 -- Compte, pour UN joueur donne, le nombre d'alertes actives par type
--- (defines.alert_type).
+-- (defines.alert_type). L'effet RGB n'a besoin QUE de ce compte par type
+-- (#list) : c'est O(nombre de types), pas O(nombre d'alertes).
+--
+-- ATTENTION PERF : ne PAS reintroduire de boucle "for alert_data in list" ici.
+-- Profile sur la base Py d'Ibalek : player.get_alerts{} renvoie ~3381 alertes
+-- actives, et boucler dessus pour appeler event_explorer.mod_of (pcall + acces
+-- prototype.icon) coutait 38 ms PAR joueur connecte et PAR poll (1x/s) -- soit
+-- ~76 ms a deux, la vraie cause des micro-freezes (le scan electrique, lui,
+-- ne pesait que 0.16 ms une fois filtre). L'attribution par mod
+-- (storage.chroma_mod_counts, purement de la stat d'exploration) reste
+-- alimentee par les gestionnaires d'evenements discrets (on_research_finished,
+-- on_train_changed_state, ...) ou le volume est faible, pas depuis ce scan
+-- periodique.
 local function count_player_alerts(player)
   local counts = {}
   local ok, alerts = pcall(_get_alerts, player)
@@ -132,12 +144,6 @@ local function count_player_alerts(player)
         local name = ALERT_TYPE_NAMES[alert_type_id]
         if name then
           counts[name] = (counts[name] or 0) + #list
-          for _, alert_data in pairs(list) do
-            local target = alert_data.target
-            if target and target.valid then
-              record_mod_count(name, event_explorer.mod_of(target.prototype))
-            end
-          end
         end
       end
     end
