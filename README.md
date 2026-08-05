@@ -7,10 +7,10 @@ alertes logistiques...), avec une configuration entierement personnalisable
 multi-joueur : chaque joueur connecte a sa propre configuration et son propre
 etat (vie, pollution, alertes), independants des autres.
 
-Deux morceaux, obligatoirement separes (voir "Pourquoi deux morceaux ?" plus bas) :
-- Un **mod Factorio** (Lua) qui ecrit l'etat de la partie dans des fichiers JSON.
-- Un **bridge Python** qui lit ces fichiers et pilote soit le SDK REST Chroma de
-  Razer Synapse (Windows), soit OpenRazer (Linux).
+Le mod seul n'allume rien : il te faut **aussi** un petit programme a lancer a
+cote du jeu (le "bridge"). Voir [Comment ca marche ?](#comment-ca-marche-) si
+tu veux savoir pourquoi ; sinon, va directement a
+[Installation](#installation-joueurs).
 
 ## Fonctionnalites
 
@@ -20,15 +20,14 @@ Deux morceaux, obligatoirement separes (voir "Pourquoi deux morceaux ?" plus bas
   alertes logistiques (stockage plein, manque de robots/materiaux/reparations),
   sous-alimentation electrique.
 - **Alerte de securite** : un train en mouvement a proximite immediate du
-  joueur declenche une alerte distincte, pensee pour reagir plus vite que le reste du
-  statut (verifie ~10x/seconde).
+  joueur declenche une alerte distincte, pensee pour reagir plus vite que le
+  reste du statut (verifie ~10x/seconde).
 - **Alertes personnalisees** : associe une couleur au message d'un
   haut-parleur programmable (texte libre de ton choix, ex: alerte de base
   attaquee par un mod tiers) sans toucher au code.
 - **Multi-joueur** : la configuration et l'etat de chaque joueur connecte sont
-  prives (stockes dans un sous-dossier separe par joueur) -- deux personnes
-  sur le meme serveur peuvent avoir des reglages Chroma completement
-  differents sans se marcher dessus.
+  prives -- deux personnes sur le meme serveur peuvent avoir des reglages
+  Chroma completement differents sans se marcher dessus.
 - **Explorateur d'evenements** (en jeu) : liste tous les events/alertes
   disponibles, avec pour chacun quels mods l'ont declenche et combien de fois
   cette partie -- utile pour cabler un mod tiers sans lire son code source.
@@ -44,7 +43,124 @@ Deux morceaux, obligatoirement separes (voir "Pourquoi deux morceaux ?" plus bas
 
 ---
 
-## Pourquoi deux morceaux ?
+## Installation (joueurs)
+
+Deux choses a installer, dans cet ordre : **le mod** (dans Factorio) puis
+**le bridge** (le programme qui pilote vraiment les lumieres). Compte 10-15
+minutes la premiere fois.
+
+### Windows
+
+**1. Prerequis**
+
+- [Razer Synapse](https://www.razer.com/synapse) installe, lance, connecte a
+  ton compte Razer. Dans ses parametres, active **Chroma Apps** (parfois
+  appele "Chroma Connect").
+- [Python](https://www.python.org/downloads/) installe -- **pendant
+  l'installation, coche bien la case "Add python.exe to PATH"**. C'est
+  l'etape qui coince le plus souvent : si tu l'as oubliee, desinstalle et
+  relance l'installateur en la cochant cette fois.
+
+**2. Installer le mod dans Factorio** -- choisis l'une des deux methodes :
+
+- *Depuis le jeu (le plus simple)* : menu principal de Factorio -> **Mods**
+  -> **Parcourir en ligne** (ou l'icone de recherche selon la version),
+  cherche "Chroma Bridge", clique **Installer**.
+- *En telechargeant le zip* : va sur la
+  [page du mod](https://mods.factorio.com/mod/chroma-bridge), bouton
+  telecharger, puis depose le fichier `.zip` obtenu (sans le decompresser)
+  dans `%APPDATA%\Factorio\mods\`. Relance Factorio et verifie dans la liste
+  des mods que "Chroma Bridge" apparait et est coche/actif.
+
+**3. Telecharger le bridge** -- c'est un programme separe, disponible sur
+GitHub (pas sur le Mod Portal, qui ne distribue que le mod Factorio) :
+[telecharge le zip ici](https://github.com/ICCUser/ChromaRazerBridge_Factorio/archive/refs/heads/master.zip),
+puis decompresse-le ou tu veux (ton dossier Documents par exemple).
+
+**4. Installer une dependance Python** -- ouvre un terminal dans le dossier
+que tu viens de decompresser (clic droit dans le dossier -> *Ouvrir dans le
+terminal*, ou Maj+clic droit -> *Ouvrir la fenetre PowerShell ici* selon ta
+version de Windows), puis :
+```
+pip install requests
+```
+
+**5. Lancer Factorio**, charger/demarrer une partie avec le mod actif.
+
+**6. Lancer le bridge** (dans le meme terminal qu'a l'etape 4) :
+```
+python main.py
+```
+Tu dois voir "Session ouverte : http://localhost:.../chromasdk" puis une
+animation sur le clavier. **Laisse cette fenetre ouverte** tant que tu veux
+les effets lumineux -- ferme-la (ou Ctrl+C) quand tu as fini de jouer.
+
+**7. Configurer** : en jeu, `CONTROL+SHIFT+C` ouvre l'interface pour choisir
+quel evenement allume quelle touche, quelle couleur, etc. Les changements
+sont pris en compte immediatement, pas besoin de relancer le bridge.
+
+*(Optionnel mais recommande la premiere fois)* Si les touches qui s'allument
+ne correspondent pas a celles annoncees, lance `python calibrate.py` --
+Synapse doit tourner, Factorio n'est pas necessaire pour cette etape.
+
+### Linux
+
+**Implemente mais NON TESTE sur materiel reel** (voir
+["Linux : pas encore valide"](#linux--pas-encore-valide) plus bas pour le
+detail). Les memes grandes etapes s'appliquent :
+
+1. Installe [OpenRazer](https://openrazer.github.io/#download) (paquet de ta
+   distro, ou PPA/AUR) et verifie que le service `openrazer-daemon` tourne.
+   Ajoute ton utilisateur au groupe `plugdev`
+   (`sudo usermod -aG plugdev $USER`), puis **deconnecte-toi/reconnecte-toi**.
+2. Installe le mod : depuis le jeu (Mods -> Parcourir en ligne, cherche
+   "Chroma Bridge") ou en deposant le zip telecharge depuis la
+   [page du mod](https://mods.factorio.com/mod/chroma-bridge) dans
+   `~/.factorio/mods/`.
+3. Telecharge le bridge :
+   [zip GitHub](https://github.com/ICCUser/ChromaRazerBridge_Factorio/archive/refs/heads/master.zip),
+   decompresse-le ou tu veux, puis dans un terminal a cet endroit :
+   ```
+   pip install openrazer requests
+   ```
+4. Lance Factorio avec le mod actif, puis `python3 main.py`. Le client
+   Linux affiche au demarrage la liste des peripheriques detectes -- si
+   elle est vide, le probleme est cote detection OpenRazer, pas cote bridge.
+5. Meme configuration en jeu que sous Windows (`CONTROL+SHIFT+C`).
+
+---
+
+## En cas de souci
+
+- `python diagnose.py` : teste chaque appareil (clavier/souris/tapis) et
+  l'effet arc-en-ciel independamment de Factorio, pour isoler un probleme
+  materiel/Synapse d'un probleme de configuration.
+- `python print_mapping_table.py` : affiche un tableau recapitulatif de tous
+  les events/alertes disponibles et de leur configuration actuelle.
+- Si "le tapis de souris ne repond a rien" : sur certaines configs Synapse, le
+  tapis est en fait enregistre sous la categorie `chromalink` plutot que
+  `mousepad`. Essaie `chromalink` comme peripherique pour l'evenement concerne
+  dans l'interface en jeu.
+- Si `CONTROL+SHIFT+C` ne fait rien : un autre mod actif peut utiliser le
+  meme raccourci (Factorio ne previent pas toujours clairement en cas de
+  conflit), ou le raccourci a pu etre change/desactive par erreur. Verifie
+  et reassigne-le dans **Parametres > Commandes**, cherche "Chroma Bridge" ;
+  en attendant, la commande console `/chroma-bridge` (touche `` ` `` ou `~`
+  pour ouvrir la console) ouvre la meme interface, sans dependre d'aucun
+  raccourci clavier.
+- Rien ne s'allume du tout : verifie dans l'ordre -- (1) le bridge
+  (`python main.py`) tourne bien et affiche "Session ouverte", (2) Synapse
+  (Windows) ou `openrazer-daemon` (Linux) tourne, (3) le mod est bien coche
+  actif dans la liste des mods Factorio.
+
+---
+
+## Développement
+
+Cette section s'adresse a quelqu'un qui veut modifier le mod ou le bridge,
+pas juste jouer avec. Si tu es juste joueur, tu peux t'arreter ici.
+
+### Comment ca marche ?
 
 Un mod Factorio tourne dans le bac a sable Lua du jeu : pas d'acces reseau, pas
 d'acces au systeme de fichiers en dehors de `script-output/`, donc aucun moyen
@@ -53,89 +169,7 @@ directement depuis `control.lua`. Le mod se contente donc d'ecrire l'etat de
 la partie dans des fichiers JSON ; un script Python externe (qui, lui, a acces
 au reseau/systeme) les relit et pilote le RGB. C'est aussi ce qui permet au
 bridge de tourner independamment du jeu (redemarrage sans recharger la partie,
-diagnostic hors Factorio via `diagnose.py`, etc.).
-
----
-
-## Installation (Windows)
-
-### Pre-requis
-
-- [Razer Synapse](https://www.razer.com/synapse) installe et lance, connecte a un compte Razer.
-- Dans Synapse : **Chroma Apps** (parfois appele "Chroma Connect") doit etre active dans les parametres.
-- [Python 3.10+](https://www.python.org/downloads/) installe (coche "Add python.exe to PATH" a l'installation).
-- Factorio 2.0+ (le mod utilise des events/defines specifiques a la 2.0).
-
-### Etapes
-
-1. **Copier le mod** : copie le dossier `mod/` de ce repo dans `%APPDATA%\Factorio\mods\`
-   en le renommant `chroma-bridge_1.6.0` (le nom du dossier de developpement
-   n'a pas d'importance pour Factorio, seul `info.json` compte, mais ca evite
-   toute confusion). Verifie qu'il apparait et est active dans le launcher
-   Factorio (liste des mods).
-   Si tu comptes modifier le mod toi-meme, un lien symbolique (`mklink /J`
-   sous Windows, `ln -s` sous Linux) entre ce dossier et `mod/` t'evite d'avoir
-   a recopier a chaque changement.
-
-2. **Installer les dependances Python** (dans un terminal, a la racine de ce dossier) :
-   ```
-   pip install requests
-   ```
-
-3. **Lancer Factorio**, charger/demarrer une partie avec le mod actif.
-
-4. **Verifier l'alignement des touches** (recommande a la premiere installation,
-   et si tu changes de clavier) : Synapse doit tourner, Factorio n'est pas
-   necessaire pour cette etape.
-   ```
-   python calibrate.py
-   ```
-   Suis les instructions affichees (voir aussi les commentaires en tete de
-   `calibrate.py`). Les corrections sont sauvegardees dans `grid_overrides.json`.
-
-5. **Lancer le bridge**, en jeu ou avec Factorio ouvert a cote :
-   ```
-   python main.py
-   ```
-   Tu dois voir "Session ouverte : http://localhost:.../chromasdk" puis
-   l'animation de demarrage sur le clavier.
-
-6. **Configurer** : en jeu, `CONTROL+SHIFT+C` ouvre l'interface de configuration
-   (quel event/alerte allume quelle touche/zone, quelle couleur, clignotement...).
-   Les changements sont pris en compte par `main.py` sans le relancer.
-
-### En cas de souci
-
-- `python diagnose.py` : teste chaque appareil (clavier/souris/tapis) et l'effet
-  arc-en-ciel independamment de Factorio, pour isoler un probleme materiel/Synapse
-  d'un probleme de configuration.
-- `python print_mapping_table.py` : affiche un tableau recapitulatif de tous les
-  events/alertes disponibles et de leur configuration actuelle.
-- Si "le tapis de souris ne repond a rien" : sur certaines configs Synapse, le
-  tapis est en fait enregistre sous la categorie `chromalink` plutot que
-  `mousepad`. Essaie `chromalink` comme peripherique pour l'evenement concerne
-  dans l'interface en jeu.
-- Si `CONTROL+SHIFT+C` ne fait rien : un autre mod actif peut utiliser le
-  meme raccourci (Factorio ne previent pas toujours clairement en cas de
-  conflit), ou le raccourci a pu etre change/desactive par erreur. Verifie
-  et reassigne-le dans **Parametres > Commandes > Chroma Bridge** ; en
-  attendant, la commande console `/chroma-bridge` (touche `` ` `` ou `~`
-  pour ouvrir la console) ouvre la meme interface, sans dependre d'aucun
-  raccourci clavier.
-
----
-
-## Installation (Linux)
-
-**Implemente mais NON TESTE** (aucune machine Linux + materiel Razer
-disponible pendant le developpement). Le code a ete ecrit contre l'API
-officielle documentee/exemples du depot
-[openrazer/openrazer](https://github.com/openrazer/openrazer), mais n'a
-jamais tourne en conditions reelles -- attends-toi a devoir corriger deux ou
-trois choses au premier essai, avec la meme methode que cote Windows
-(isoler le probleme avec un test direct plutot que deviner).
-
-### Pourquoi un client different de Windows
+diagnostic hors Factorio via `diagnose.py`, etc.)
 
 Sous Windows, `chroma_client.py` parle a **Razer Synapse** via son SDK REST
 (`http://localhost:54235/razer/chromasdk`). Synapse n'existe pas sur Linux.
@@ -147,38 +181,43 @@ expose exactement la meme interface que `chroma_client.py`
 `breathing_all()`, `close()`) -- `main.py` choisit automatiquement le bon
 client selon `sys.platform`, aucune autre difference entre les deux OS.
 
-### Pre-requis
+### Mettre en place un environnement de dev
 
-- [OpenRazer](https://openrazer.github.io/#download) installe (paquet de ta
-  distro, ou PPA/AUR officiel) et le service `openrazer-daemon` lance.
-- Ton utilisateur ajoute au groupe `plugdev` (`sudo usermod -aG plugdev $USER`),
-  puis **deconnecte-toi/reconnecte-toi** (le groupe n'est pris en compte qu'a
-  la prochaine session).
-- `pip install openrazer requests`
-- Factorio 2.0+ avec le mod copie dans `~/.factorio/mods/` (ou l'equivalent
-  selon ton installation -- Steam vs binaire officiel changent l'emplacement).
-  Le bridge detecte automatiquement `~/.factorio/` (installation native) puis
-  `~/.var/app/com.valvesoftware.Steam/.factorio/` (Steam via Flatpak) ; si ton
-  installation utilise un autre emplacement, indique-le explicitement en
-  passant `script_output_dir` a `FactorioWatcher` (voir `factorio_watcher.py`).
+1. Clone le depot (`git clone https://github.com/ICCUser/ChromaRazerBridge_Factorio.git`)
+   plutot que de telecharger le zip.
+2. `pip install requests` (+ `openrazer` sur Linux).
+3. Symlink le dossier `mod/` du repo vers l'emplacement des mods Factorio,
+   pour tester tes changements sans avoir a recopier des fichiers a chaque
+   fois :
+   - Windows : `mklink /J %APPDATA%\Factorio\mods\chroma-bridge_dev C:\chemin\vers\le\repo\mod`
+   - Linux : `ln -s /chemin/vers/le/repo/mod ~/.factorio/mods/chroma-bridge_dev`
 
-### Etapes
+### Workflow de dev cote mod
 
-1. Verifie d'abord qu'OpenRazer voit bien ton materiel, **avant** de toucher
-   au bridge : `lsusb` doit lister tes peripheriques Razer, et un outil comme
-   [Polychromatic](https://polychromatic.app/) ou une commande manuelle
-   (voir doc OpenRazer) doit pouvoir changer une couleur. Si OpenRazer seul
-   n'arrive pas a piloter le materiel, le bridge Python ne pourra pas non
-   plus -- c'est le meme principe que verifier Synapse cote Windows avant de
-   soupconner le code.
-2. Lance `python3 main.py`. Le client Linux affiche au demarrage la liste des
-   peripheriques detectes (`[chroma_client_linux] Peripheriques OpenRazer
-   detectes : ...`) -- si cette liste est vide ou incomplete, le probleme est
-   cote detection OpenRazer, pas cote bridge.
-3. Le reste (configuration en jeu, calibration clavier, etc.) fonctionne
-   exactement comme sur Windows -- voir la section Windows ci-dessus.
+`mod/` (ce repo) est **la seule source de verite** pour le mod Lua. Ne modifie
+jamais directement les fichiers dans le dossier de mods de Factorio sans
+symlink (voir ci-dessus) : ce dossier n'est pas versionne, et un changement
+fait uniquement la-bas est perdu au prochain `git pull` (c'est exactement ce
+qui s'est passe pendant le developpement de la 1.4.1, d'ou la reconciliation
+manuelle qui a suivi). Pour publier une nouvelle version :
 
-### Limites connues / a verifier en premier
+1. Modifie `mod/`, incremente `version` dans `mod/info.json`.
+2. `python package_mod.py` -> produit `dist/chroma-bridge_<version>.zip`.
+3. Upload ce zip comme nouvelle release sur le [Mod Portal](https://mods.factorio.com/)
+   -- le portail ne remplace pas le contenu d'une version deja publiee,
+   chaque changement (meme juste une image ou un texte de description) exige
+   un nouveau numero.
+
+### Linux : pas encore valide
+
+Le code a ete ecrit contre l'API officielle documentee/exemples du depot
+[openrazer/openrazer](https://github.com/openrazer/openrazer), mais n'a
+jamais tourne en conditions reelles (aucune machine Linux + materiel Razer
+disponible pendant le developpement) -- attends-toi a devoir corriger deux ou
+trois choses au premier essai, avec la meme methode que cote Windows (isoler
+le probleme avec un test direct plutot que deviner).
+
+Limites connues / a verifier en premier :
 
 - La correspondance appareil OpenRazer <-> nos noms (`mousepad`/`chromalink`
   -> `mousemat` cote OpenRazer) est faite par `device.type`, jamais verifiee
@@ -195,9 +234,7 @@ client selon `sys.platform`, aucune autre difference entre les deux OS.
 Voir [TESTING_LINUX.md](TESTING_LINUX.md) pour une checklist detaillee de
 validation sur materiel reel.
 
----
-
-## Structure du projet
+### Structure du projet
 
 | Fichier | Role |
 |---|---|
@@ -215,27 +252,10 @@ validation sur materiel reel.
 | `export_keyboard_layout_lua.py` | Regenere `keyboard_layout_data.lua` (cote mod) depuis `keyboard_layout.py` |
 | `package_mod.py` | Empaquette le mod Lua en zip pret pour le mod portal Factorio |
 
-Cote mod (`mod/`, source de verite -- a copier/symlinker dans `%APPDATA%\Factorio\mods\`) :
+Cote mod (`mod/`, source de verite) :
 `control.lua` (evenements de jeu), `gui.lua` (interface CONTROL+SHIFT+C), `event_explorer.lua`
 (explorateur d'evenements), `keyboard_layout_data.lua` (grille clavier, genere),
 `util.lua` (ecriture JSON partagee), `data.lua` (raccourci clavier), `info.json`.
-
-### Workflow de dev cote mod
-
-`mod/` (ce repo) est **la seule source de verite** pour le mod Lua. Le
-symlink (`mklink /J` Windows, `ln -s` Linux) vers `%APPDATA%\Factorio\mods\`
-ou `~/.factorio/mods/` sert a tester en jeu -- ne modifie jamais directement
-les fichiers dans le dossier de mods de Factorio sans symlink : ce dossier
-n'est pas versionne, et un changement fait uniquement la-bas est perdu au
-prochain `git pull` (c'est exactement ce qui s'est passe pendant le
-developpement de la 1.4.1, d'ou la reconciliation manuelle qui a suivi).
-Pour publier une nouvelle version :
-
-1. Modifie `mod/`, incremente `version` dans `mod/info.json`.
-2. `python package_mod.py` -> produit `dist/chroma-bridge_<version>.zip`.
-3. Upload ce zip comme nouvelle release sur le [Mod Portal](https://mods.factorio.com/)
-   -- le portail ne remplace pas le contenu d'une version deja publiee,
-   chaque changement (meme juste une image) exige un nouveau numero.
 
 ### Fichiers echanges (mod -> bridge)
 
