@@ -41,7 +41,7 @@ if sys.platform.startswith("linux"):
     from chroma_client_linux import ChromaClient
 else:
     from chroma_client import ChromaClient
-from factorio_watcher import FactorioWatcher
+from factorio_watcher import FactorioWatcher, find_player_output_dir
 from keyboard_grid import COLS, ROWS, sweep_fill_grid, blank_grid, rgb_to_chroma
 from keyboard_layout import resolve_keys
 from mapping_loader import MappingStore
@@ -58,7 +58,12 @@ def _rgb(value, fallback=(255, 255, 255)):
 
 def effective_color(cfg: dict, now: float):
     """Couleur a afficher a cet instant precis pour ce cfg. Renvoie None si
-    le clignotement est dans sa phase 'eteinte'."""
+    le clignotement est dans sa phase 'eteinte'. Le style 'spectrum' (case
+    "Effet arc-en-ciel" en jeu) marche pour n'importe quel peripherique --
+    pas seulement 'all' -- puisque tous les chemins de rendu (evenements,
+    alertes clavier/souris/tapis/ChromaLink) passent par cette fonction."""
+    if cfg.get("style") == "spectrum":
+        return rainbow_color(now)
     color = _rgb(cfg.get("color"))
     if not cfg.get("blink"):
         return color
@@ -192,7 +197,7 @@ def build_keyboard_grid(status: dict, mapping: MappingStore, layout: str, keyboa
         return None
 
     color1, color2 = keyboard_idle_colors(status, mapping)
-    idle_rgb = breathing_color(now, color1, color2)
+    idle_rgb = breathing_color(now, color1, color2, keyboard_idle_speed(mapping))
     grid = blank_grid(idle_rgb)
     for layer in layers:
         for row, col, color in layer:
@@ -200,9 +205,17 @@ def build_keyboard_grid(status: dict, mapping: MappingStore, layout: str, keyboa
     return grid
 
 
-def compute_keyboard_idle(client: ChromaClient, status: dict, mapping: MappingStore):
+def compute_keyboard_idle(client: ChromaClient, status: dict, mapping: MappingStore, now: float):
+    """Calcule la couleur idle a la main (breathing_color) plutot que de
+    s'appuyer sur l'effet CHROMA_BREATHING natif du SDK : ce dernier n'expose
+    aucun controle de vitesse, alors que le calcul manuel utilise dans
+    build_keyboard_grid (quand une grille personnalisee est active en meme
+    temps) le permet deja -- meme mecanisme des deux cotes, meme vitesse
+    configurable (keyboard_idle.breathing_speed), pas de rupture de rythme
+    en basculant entre les deux etats."""
     color1, color2 = keyboard_idle_colors(status, mapping)
-    client.breathing("keyboard", color1, color2)
+    idle_rgb = breathing_color(now, color1, color2, keyboard_idle_speed(mapping))
+    client.static("keyboard", idle_rgb)
 
 
 def _threshold_matches(threshold: dict, status: dict) -> bool:
@@ -243,6 +256,12 @@ def keyboard_idle_colors(status: dict, mapping: MappingStore):
     if reactive:
         return ambient_colors_for(ambient_cfg, status)
     return _rgb(idle_cfg.get("color1")), _rgb(idle_cfg.get("color2"), (0, 0, 0))
+
+
+def keyboard_idle_speed(mapping: MappingStore) -> float:
+    """Duree (secondes) d'un cycle complet de respiration idle du clavier --
+    reglable en jeu (case "Couleur par defaut", CONTROL+SHIFT+C)."""
+    return mapping["keyboard_idle"].get("breathing_speed", 3.0)
 
 
 def render_device_lane(client: ChromaClient, device: str, hold_state: dict, alerts_cfg: dict,
@@ -286,6 +305,19 @@ def main():
 
     watcher = FactorioWatcher()
     print(f"Surveillance de : {watcher.dir}")
+    # Diagnostic explicite : en multijoueur, si ce sous-dossier ne correspond
+    # pas a TON joueur (ou reste egal au dossier partage ci-dessus), ta
+    # config personnalisee en jeu (CONTROL+SHIFT+C) ne sera jamais lue --
+    # le bridge retombe silencieusement sur mapping.json (identique pour
+    # tout le monde), ce qui donne l'impression d'avoir la meme config qu'un
+    # autre joueur alors que chacun a bien personnalise la sienne cote jeu.
+    player_dir = find_player_output_dir(watcher.dir)
+    if player_dir == watcher.dir:
+        print("Sous-dossier prive du joueur : PAS ENCORE DETECTE (ouvre "
+              "CONTROL+SHIFT+C et clique Appliquer une fois en jeu pour que "
+              "Factorio le cree, puis relance le bridge si besoin)")
+    else:
+        print(f"Sous-dossier prive du joueur : {player_dir}")
     print(f"Config de mapping : {mapping.path} (modifiable a chaud, ou depuis le jeu)")
 
     all_hold = {"until": 0.0, "cfg": None}
@@ -348,11 +380,10 @@ def main():
                     active_all_cfg = alert[1]
 
             if active_all_cfg:
-                if active_all_cfg.get("style") == "spectrum":
-                    client.static_all(rainbow_color(now))
-                else:
-                    color = effective_color(active_all_cfg, now)
-                    client.static_all(color if color else (0, 0, 0))
+                # effective_color() gere deja le style 'spectrum' -- plus besoin
+                # de le special-caser ici separement.
+                color = effective_color(active_all_cfg, now)
+                client.static_all(color if color else (0, 0, 0))
             else:
                 for device_name in DEVICE_HOLD_NAMES:
                     render_device_lane(client, device_name, device_hold[device_name], alerts_cfg,
@@ -362,7 +393,7 @@ def main():
                 if grid is not None:
                     client.custom_keyboard(grid)
                 else:
-                    compute_keyboard_idle(client, status, mapping)
+                    compute_keyboard_idle(client, status, mapping, now)
 
             time.sleep(mapping.get("poll_seconds", 0.2))
     except (KeyboardInterrupt, SystemExit):

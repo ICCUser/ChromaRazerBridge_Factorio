@@ -24,7 +24,7 @@ DEFAULTS = {
     "layout": "azerty_fr",
     "poll_seconds": 0.2,
     "ambient": {"devices": ["mouse", "chromalink"], "color1": [230, 100, 20], "color2": [20, 10, 0], "thresholds": []},
-    "keyboard_idle": {"color1": [230, 100, 20], "color2": [20, 10, 0], "ambient_reactive": False},
+    "keyboard_idle": {"color1": [230, 100, 20], "color2": [20, 10, 0], "ambient_reactive": False, "breathing_speed": 3.0},
     "research_bar": {
         "enabled": True,
         "keys": ["F1", "F2", "F3", "F4", "F5", "F6", "F7", "F8", "F9", "F10", "F11", "F12"],

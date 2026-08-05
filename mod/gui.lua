@@ -52,7 +52,7 @@ local DEVICES = {
   {key = "mouse", label = "Souris"},
   {key = "mousepad", label = "Tapis de souris"},
   {key = "headset", label = "Casque"},
-  {key = "chromalink", label = "ChromaLink (= ton tapis, apparemment !)"},
+  {key = "chromalink", label = "ChromaLink (parfois le nom du tapis de souris selon ta config Synapse)"},
 }
 
 local ZONES = {
@@ -95,6 +95,7 @@ local DEFAULT_MAPPING = {
   keyboard_idle = {
     color1 = {230, 100, 20},
     color2 = {20, 10, 0},
+    breathing_speed = 3.0,
   },
   research_bar = {
     enabled = true,
@@ -348,11 +349,12 @@ local function build_detail(player)
   local device_dd = detail.add{type = "drop-down", name = "chroma_device_dropdown", items = device_labels()}
   device_dd.selected_index = device_index_of(cfg.device or "all")
 
-  local style_checkbox = detail.add{
+  -- Disponible pour n'importe quel peripherique (pas seulement "Tous les
+  -- peripheriques") : voir effective_color() cote bridge Python.
+  detail.add{
     type = "checkbox", name = "chroma_style_spectrum_checkbox",
     caption = "Effet arc-en-ciel (ignore la couleur choisie)", state = (cfg.style == "spectrum"),
   }
-  set_visible(style_checkbox, cfg.device == "all")
 
   local scope_flow = detail.add{type = "flow", name = "chroma_scope_flow", direction = "vertical"}
   set_visible(scope_flow, cfg.device == "keyboard")
@@ -677,6 +679,16 @@ local function build_default_color_editor(player)
   add_color_picker_widgets(window, "chroma_kd_c2", draft.color2 or {20, 10, 0})
 
   window.add{type = "line"}
+  local speed = draft.breathing_speed or 3.0
+  window.add{type = "label", caption = "Vitesse de la respiration (duree d'un cycle complet) :"}
+  local speed_flow = window.add{type = "flow", direction = "horizontal"}
+  speed_flow.add{
+    type = "slider", name = "chroma_kd_speed_slider",
+    minimum_value = 5, maximum_value = 150, value = math.floor(speed * 10 + 0.5),
+  }
+  speed_flow.add{type = "label", name = "chroma_kd_speed_value_label", caption = string.format("%.1fs", speed)}
+
+  window.add{type = "line"}
   window.add{
     type = "checkbox", name = "chroma_kd_ambient_checkbox",
     caption = "Reactif a l'etat de la partie (evolution des biters, pollution, jour/nuit)",
@@ -704,6 +716,7 @@ function gui.toggle_default_color_editor(player)
   storage.chroma_default_draft = storage.chroma_default_draft or {}
   local draft = deep_copy(player_mapping(player).keyboard_idle)
   if draft.ambient_reactive == nil then draft.ambient_reactive = false end
+  if draft.breathing_speed == nil then draft.breathing_speed = 3.0 end
   storage.chroma_default_draft[player.index] = draft
 
   local window = screen.add{
@@ -1552,6 +1565,15 @@ function gui.on_value_changed(event)
       if name == "chroma_kd_c2_slider_r" then kd_draft.color2[1] = value end
       if name == "chroma_kd_c2_slider_g" then kd_draft.color2[2] = value end
       if name == "chroma_kd_c2_slider_b" then kd_draft.color2[3] = value end
+      build_default_color_editor(player)
+    end
+    return
+  end
+
+  if name == "chroma_kd_speed_slider" then
+    local kd_draft = storage.chroma_default_draft[player.index]
+    if kd_draft then
+      kd_draft.breathing_speed = value / 10
       build_default_color_editor(player)
     end
     return
