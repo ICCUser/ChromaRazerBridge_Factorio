@@ -32,6 +32,16 @@ local POWER_SCAN_INTERVAL_TICKS = 180 -- ~3s : contrairement au train (danger im
                                        -- totale au temps de frame. Resultat mis en cache
                                        -- (storage.chroma_power_cache) et relu par write_status.
 local CRAFT_EVENT_MIN_INTERVAL = 30 -- ticks (~0.5s) entre deux "item_crafted" pour eviter le spam
+local BASE_ATTACK_EVENT_MIN_INTERVAL = 180 -- ticks (~3s, aligne sur le "hold" par defaut de l'effet
+                                            -- base_under_attack cote mapping.json) entre deux ecritures.
+                                            -- on_entity_damaged se declenche pour CHAQUE degat inflige
+                                            -- dans toute la partie (pas seulement au joueur) -- sous une
+                                            -- grosse attaque de biters, ca peut etre des centaines de
+                                            -- fois par seconde, et sans throttle chaque occurrence qui
+                                            -- passe le filtre (joueur + biters) declenchait une ecriture
+                                            -- disque. L'effet visuel reste affiche pendant le hold de
+                                            -- toute facon, pas la peine de reecrire plus souvent que ca
+                                            -- ne peut visuellement changer quelque chose.
 local MAPPING_SELF_REPAIR_INTERVAL_TICKS = 60 * 15 -- ~15s : gui.ensure_mapping_files() re-ecrit
                                                     -- chroma_mapping.json de chaque joueur, uniquement
                                                     -- pour se reparer si le fichier a disparu -- pas
@@ -56,6 +66,12 @@ local last_craft_event_tick = {} -- par joueur (event.player_index) : le seuil a
                                    -- (CRAFT_EVENT_MIN_INTERVAL) ne doit s'appliquer qu'a un
                                    -- meme joueur qui craft en rafale, pas empecher le craft
                                    -- d'un autre joueur juste parce que le premier vient d'agir
+local last_base_attack_event_tick = 0 -- global (pas par joueur) : base_under_attack est un evenement
+                                       -- d'equipe partage, un seul throttle suffit
+local last_train_nearby = {} -- par joueur (player.index) : evite de reecrire chroma_train_proximity.json
+                              -- si la valeur n'a pas change -- ce scan tourne 10x/seconde, et
+                              -- train_nearby vaut 0 en continu la quasi-totalite du temps (pas de train
+                              -- a proximite) -- pas la peine d'ecrire un fichier identique 10x/s pour rien.
 local POWER_SCAN_RADIUS = 40 -- tuiles autour de chaque joueur connecte (pas toute la base, pour les perfs).
                              -- 150 a l'origine : sur une base dense, le scan ramenait des milliers
                              -- d'entites d'un coup et gelait la frame (~100 ms mesures). Reduit une
@@ -244,7 +260,8 @@ end
 script.on_nth_tick(TRAIN_SCAN_INTERVAL_TICKS, function()
   for _, player in pairs(game.connected_players) do
     local ok, counts = pcall(count_nearby_moving_train, player)
-    if ok then
+    if ok and last_train_nearby[player.index] ~= counts.train_nearby then
+      last_train_nearby[player.index] = counts.train_nearby
       util.safe_write_json("chroma_train_proximity.json", counts, false, player.index)
     end
   end
@@ -378,10 +395,17 @@ script.on_event(defines.events.on_research_finished, function(event)
   record_mod_count("research_finished", event_explorer.mod_of(event.research))
 end)
 
--- Evenement : entite du joueur endommagee (attaque de biters typiquement)
+-- Evenement : entite du joueur endommagee (attaque de biters typiquement).
+-- on_entity_damaged se declenche pour CHAQUE degat inflige dans toute la
+-- partie (pas seulement au joueur) -- throttle (BASE_ATTACK_EVENT_MIN_INTERVAL)
+-- pour ne pas ecrire un fichier a chaque occurrence sous une grosse attaque.
 script.on_event(defines.events.on_entity_damaged, function(event)
   if event.entity and event.entity.force and event.entity.force.name == "player" then
     if event.cause and event.cause.type and event.cause.type:find("biter") then
+      if game.tick - last_base_attack_event_tick < BASE_ATTACK_EVENT_MIN_INTERVAL then
+        return
+      end
+      last_base_attack_event_tick = game.tick
       util.safe_write_json("chroma_events.jsonl", {
         type = "base_under_attack",
         tick = game.tick,
