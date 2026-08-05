@@ -395,6 +395,21 @@ script.on_event("chroma-bridge-toggle-gui", safe_gui_handler(function(event)
   gui.toggle(game.get_player(event.player_index))
 end))
 
+-- Secours au raccourci CONTROL+SHIFT+C : Factorio permet a n'importe quel
+-- mod de rentrer en conflit avec ce raccourci (ou au joueur de le
+-- reassigner/desactiver par erreur dans Parametres > Commandes) sans que
+-- rien ne le signale clairement en jeu. Une commande console fonctionne
+-- toujours, quel que soit l'etat des raccourcis clavier.
+commands.add_command("chroma-bridge", "Ouvre/ferme la configuration Chroma Bridge (secours si CONTROL+SHIFT+C ne repond pas)", function(command)
+  local player = game.get_player(command.player_index)
+  if player then
+    local ok, err = pcall(gui.toggle, player)
+    if not ok then
+      log("[chroma-bridge] erreur GUI ignoree (commande /chroma-bridge) : " .. tostring(err))
+    end
+  end
+end)
+
 script.on_event(defines.events.on_gui_click, safe_gui_handler(gui.on_click))
 script.on_event(defines.events.on_gui_checked_state_changed, safe_gui_handler(gui.on_checked_state_changed))
 script.on_event(defines.events.on_gui_selection_state_changed, safe_gui_handler(gui.on_selection_state_changed))

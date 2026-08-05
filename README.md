@@ -32,10 +32,15 @@ Deux morceaux, obligatoirement separes (voir "Pourquoi deux morceaux ?" plus bas
 - **Explorateur d'evenements** (en jeu) : liste tous les events/alertes
   disponibles, avec pour chacun quels mods l'ont declenche et combien de fois
   cette partie -- utile pour cabler un mod tiers sans lire son code source.
-- **Tout se configure en jeu** (`CONTROL+SHIFT+C`) : clavier virtuel AZERTY/QWERTY
+- **Tout se configure en jeu** (`CONTROL+SHIFT+C`, ou la commande `/chroma-bridge`
+  si ce raccourci est en conflit avec un autre mod) : clavier virtuel AZERTY/QWERTY
   pour choisir une touche/zone precise, barre de recherche et barre de vie
   personnalisables, couleur par defaut (fixe ou reactive a l'evolution des
   biters / la pollution / le jour-nuit).
+- **Export / import de ta config** : depuis l'interface, copie toute ta
+  configuration en JSON (un clic) pour la sauvegarder ou la partager, et
+  colle-en une pour la restaurer -- pratique pour ne pas tout re-cliquer a la
+  main apres une reinstallation, ou pour recopier la config d'un coequipier.
 
 ---
 
@@ -64,7 +69,7 @@ diagnostic hors Factorio via `diagnose.py`, etc.).
 ### Etapes
 
 1. **Copier le mod** : copie le dossier `mod/` de ce repo dans `%APPDATA%\Factorio\mods\`
-   en le renommant `chroma-bridge_1.5.2` (le nom du dossier de developpement
+   en le renommant `chroma-bridge_1.6.0` (le nom du dossier de developpement
    n'a pas d'importance pour Factorio, seul `info.json` compte, mais ca evite
    toute confusion). Verifie qu'il apparait et est active dans le launcher
    Factorio (liste des mods).
@@ -110,6 +115,13 @@ diagnostic hors Factorio via `diagnose.py`, etc.).
   tapis est en fait enregistre sous la categorie `chromalink` plutot que
   `mousepad`. Essaie `chromalink` comme peripherique pour l'evenement concerne
   dans l'interface en jeu.
+- Si `CONTROL+SHIFT+C` ne fait rien : un autre mod actif peut utiliser le
+  meme raccourci (Factorio ne previent pas toujours clairement en cas de
+  conflit), ou le raccourci a pu etre change/desactive par erreur. Verifie
+  et reassigne-le dans **Parametres > Commandes > Chroma Bridge** ; en
+  attendant, la commande console `/chroma-bridge` (touche `` ` `` ou `~`
+  pour ouvrir la console) ouvre la meme interface, sans dependre d'aucun
+  raccourci clavier.
 
 ---
 

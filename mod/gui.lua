@@ -890,6 +890,62 @@ function gui.toggle_watches_editor(player)
   build_watches_editor(player)
 end
 
+-- --- Export / import de la config du joueur ---
+-- Toute la config personnelle (layout, couleurs, alertes, alertes perso...)
+-- vit dans un seul objet (player_mapping(player)) -- l'exporter/l'importer
+-- se resume donc a le (de)serialiser en JSON. Utile pour sauvegarder sa
+-- config avant de la modifier, ou la partager/recopier sur une autre partie
+-- sans tout re-cliquer a la main dans l'interface.
+local function build_export_editor(player)
+  local window = player.gui.screen.chroma_export_window
+  if not window then return end
+  window.clear()
+
+  window.add{
+    type = "label",
+    caption = "[color=150,150,150]Ta configuration actuelle, en JSON -- selectionne le texte "
+      .. "(Ctrl+A puis Ctrl+C) et garde-le de cote pour la restaurer plus tard ou la partager.[/color]",
+  }
+  local export_field = window.add{
+    type = "text-box", name = "chroma_export_output",
+    text = helpers.table_to_json(player_mapping(player)),
+    read_only = true, word_wrap = true,
+  }
+  export_field.style.minimal_width = 560
+  export_field.style.minimal_height = 140
+
+  window.add{type = "line"}
+  window.add{
+    type = "label",
+    caption = "[color=150,150,150]Colle ici une configuration exportee (la tienne ou celle d'un autre "
+      .. "joueur) puis clique Importer -- ca REMPLACE entierement ta configuration actuelle.[/color]",
+  }
+  local import_field = window.add{type = "text-box", name = "chroma_import_input", text = "", word_wrap = true}
+  import_field.style.minimal_width = 560
+  import_field.style.minimal_height = 140
+
+  window.add{type = "line"}
+  local bottom = window.add{type = "flow", direction = "horizontal"}
+  bottom.add{type = "button", name = "chroma_import_button", caption = "Importer"}
+  bottom.add{type = "button", name = "chroma_export_close_button", caption = "Fermer"}
+end
+
+function gui.toggle_export_editor(player)
+  local screen = player.gui.screen
+  if screen.chroma_export_window then
+    screen.chroma_export_window.destroy()
+    return
+  end
+
+  local window = screen.add{
+    type = "frame", name = "chroma_export_window", direction = "vertical",
+    caption = "Chroma Bridge - Exporter / Importer",
+  }
+  window.auto_center = true
+
+  build_export_editor(player)
+end
+
 function gui.toggle(player)
   local screen = player.gui.screen
   if screen.chroma_bridge_window then
@@ -926,6 +982,7 @@ function gui.toggle(player)
   bottom.add{type = "button", name = "chroma_open_health_button", caption = "Barre de vie"}
   bottom.add{type = "button", name = "chroma_open_default_button", caption = "Couleur par defaut"}
   bottom.add{type = "button", name = "chroma_open_watches_button", caption = "Alertes personnalisees"}
+  bottom.add{type = "button", name = "chroma_open_export_button", caption = "Exporter / Importer"}
 
   player.opened = window
 end
@@ -1176,6 +1233,46 @@ function gui.on_click(event)
       if player.gui.screen.chroma_bridge_window then
         build_list(player.gui.screen.chroma_bridge_window.chroma_body.chroma_list_scroll, player)
       end
+    end
+    return
+  end
+
+  if name == "chroma_open_export_button" then
+    gui.toggle_export_editor(player)
+    return
+  end
+
+  if name == "chroma_export_close_button" then
+    if player.gui.screen.chroma_export_window then
+      player.gui.screen.chroma_export_window.destroy()
+    end
+    return
+  end
+
+  if name == "chroma_import_button" then
+    local window = player.gui.screen.chroma_export_window
+    local field = window and window.chroma_import_input
+    local text = field and field.text or ""
+    if text == "" then
+      player.print("Chroma Bridge : rien a importer (colle une configuration d'abord).")
+      return
+    end
+    local imported = helpers.json_to_table(text)
+    if type(imported) ~= "table" then
+      player.print("Chroma Bridge : JSON invalide, import annule.")
+      return
+    end
+    storage.player_mappings = storage.player_mappings or {}
+    storage.player_mappings[player.name] = deep_copy(imported)
+    -- Recree tout de suite les champs manquants (import partiel, ou config
+    -- d'une version anterieure) plutot que d'attendre le prochain tick de
+    -- write_status -- meme logique que la migration de sauvegarde.
+    gui.init_defaults()
+    write_mapping_file(player)
+    player.print("Chroma Bridge : configuration importee.")
+    if field then field.text = "" end
+    if player.gui.screen.chroma_bridge_window then
+      build_list(player.gui.screen.chroma_bridge_window.chroma_body.chroma_list_scroll, player)
     end
     return
   end
