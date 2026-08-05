@@ -2,6 +2,14 @@
 -- quel appareil / quelle touche / quelle couleur / quel clignotement est
 -- associe a chaque evenement ponctuel ou alerte continue du bridge.
 --
+-- Une seule fenetre, organisee en onglets (tabbed-pane) plutot qu'en une
+-- demi-douzaine de fenetres flottantes independantes -- c'etait le plus
+-- gros reproche remonte sur l'interface d'origine. Voir TAB_* plus bas pour
+-- la liste des onglets et tab_content() pour la subtilite d'acces a leur
+-- contenu (le contenu d'un onglet n'est PAS accessible par nom depuis le
+-- tabbed-pane comme un enfant normal -- specificite de ce widget Factorio,
+-- il faut passer par tabbed_pane.tabs[index].content).
+--
 -- Le resultat est ecrit dans script-output/chroma_mapping.json, relu et
 -- fusionne automatiquement par le bridge Python (mapping_loader.py) sans
 -- avoir besoin de relancer main.py.
@@ -17,6 +25,15 @@ local gui = {}
 local _catalog_cache = nil
 
 local KEY_BUTTON_SIZE = 28
+
+-- Index des onglets, dans l'ordre ou ils sont crees dans gui.toggle() --
+-- l'ordre DOIT rester synchronise avec les appels a add_tab() la-bas.
+local TAB_CONFIG = 1
+local TAB_BARS = 2
+local TAB_AMBIANCE = 3
+local TAB_WATCHES = 4
+local TAB_EXPLORER = 5
+local TAB_EXPORT = 6
 
 local function player_mapping(player)
   storage.player_mappings = storage.player_mappings or {}
@@ -44,6 +61,20 @@ local function inverse_layout(layout_name)
     by_pos[pos[1] .. ":" .. pos[2]] = label
   end
   return by_pos
+end
+
+-- Contenu d'un onglet du tabbed-pane principal, par index (voir TAB_* plus
+-- haut). Le contenu ajoute via tabbed_pane.add_tab(tab, content) n'est PAS
+-- accessible par nom depuis le tabbed-pane comme un enfant normal -- il
+-- faut passer par la propriete tabs (array de {tab=.., content=..}).
+-- Renvoie nil si la fenetre ou le tabbed-pane n'existe pas (fenetre fermee).
+local function tab_content(player, index)
+  local window = player.gui.screen.chroma_bridge_window
+  if not window then return nil end
+  local pane = window.chroma_tabbed_pane
+  if not pane then return nil end
+  local entry = pane.tabs[index]
+  return entry and entry.content
 end
 
 local DEVICES = {
@@ -290,6 +321,12 @@ local function set_visible(element, visible)
   if element and element.valid then element.visible = visible end
 end
 
+local function section_label(parent, text)
+  parent.add{type = "label", caption = "[font=default-bold]" .. text .. "[/font]"}
+end
+
+-- --- Onglet "Evenements & alertes" (liste + detail) ---
+
 local function build_list(parent, player)
   parent.clear()
   local current_section = nil
@@ -324,9 +361,9 @@ local function build_list(parent, player)
 end
 
 local function build_detail(player)
-  local window = player.gui.screen.chroma_bridge_window
-  if not window then return end
-  local detail = window.chroma_body.chroma_detail_flow
+  local content = tab_content(player, TAB_CONFIG)
+  if not content then return end
+  local detail = content.chroma_detail_flow
   detail.clear()
 
   local draft = storage.chroma_draft[player.index]
@@ -338,12 +375,14 @@ local function build_detail(player)
   local cfg = draft.cfg
   local item = find_item(player, draft.section, draft.key)
 
-  detail.add{type = "label", caption = (item and item.label or draft.key)}
-
+  detail.add{type = "label", caption = "[font=default-bold]" .. (item and item.label or draft.key) .. "[/font]"}
   detail.add{
     type = "checkbox", name = "chroma_enabled_checkbox",
     caption = "Actif (declenche cet event/cette alerte)", state = (cfg.enabled ~= false),
   }
+
+  detail.add{type = "line"}
+  section_label(detail, "Apparence")
 
   detail.add{type = "label", caption = "Peripherique :"}
   local device_dd = detail.add{type = "drop-down", name = "chroma_device_dropdown", items = device_labels()}
@@ -401,6 +440,9 @@ local function build_detail(player)
   channel_slider("B", "chroma_slider_b", color[3])
   rgb_flow.add{type = "label", name = "chroma_color_preview", caption = color_swatch_caption(color, 6), tooltip = "Apercu"}
 
+  detail.add{type = "line"}
+  section_label(detail, "Comportement")
+
   local blink_checkbox = detail.add{type = "checkbox", name = "chroma_blink_checkbox", caption = "Clignoter", state = cfg.blink or false}
   local blink_flow = detail.add{type = "flow", name = "chroma_blink_flow", direction = "horizontal"}
   set_visible(blink_flow, cfg.blink or false)
@@ -426,10 +468,29 @@ local function build_detail(player)
   detail.add{type = "button", name = "chroma_apply_button", caption = "Appliquer"}
 end
 
+local function build_config_tab(player)
+  local content = tab_content(player, TAB_CONFIG)
+  if not content then return end
+  content.clear()
+  content.style.horizontal_spacing = 12
+
+  local list_scroll = content.add{type = "scroll-pane", name = "chroma_list_scroll", direction = "vertical"}
+  list_scroll.style.minimal_width = 280
+  list_scroll.style.maximal_height = 480
+  build_list(list_scroll, player)
+
+  local detail = content.add{type = "flow", name = "chroma_detail_flow", direction = "vertical"}
+  detail.style.minimal_width = 320
+  detail.add{type = "label", caption = "Selectionne un evenement ou une alerte a gauche."}
+end
+
 -- --- Clavier virtuel (choix de plusieurs touches, DANS L'ORDRE du clic) ---
--- Utilise pour deux cibles differentes (storage.chroma_picker_target) :
+-- Utilise pour trois cibles differentes (storage.chroma_picker_target) :
 --   "event_scope"   -> groupe personnalise pour l'event/alerte en cours d'edition (l'ordre n'a pas d'importance)
 --   "research_bar"  -> sequence de la barre de recherche (l'ordre EST la progression 0% -> 100%)
+--   "health_bar"    -> idem pour la barre de vie
+-- Reste une fenetre flottante independante (pas un onglet) : c'est un outil
+-- ponctuel/modal, pas une page de reglages qu'on consulte plusieurs fois.
 
 local function picker_index_of(selection, label)
   for i, l in ipairs(selection) do
@@ -530,7 +591,12 @@ function gui.toggle_keyboard_picker(player, target)
   update_picker_summary(player)
 end
 
--- --- Editeur de la barre de recherche (touches ordonnees + couleurs) ---
+-- --- Onglet "Recherche & Vie" (barre de recherche + barre de vie) ---
+-- Les deux blocs sont quasi-identiques (touches ordonnees + 2 couleurs) et
+-- restent volontairement dupliques plutot que factorises pour ne pas
+-- fragiliser l'un en modifiant l'autre -- mais partagent le meme onglet
+-- puisqu'ils repondent tous les deux a "quelle progression sur quelles
+-- touches".
 
 local function add_color_picker_widgets(parent, prefix, color)
   local flow = parent.add{type = "flow", name = prefix .. "_flow", direction = "vertical"}
@@ -553,182 +619,116 @@ local function add_color_picker_widgets(parent, prefix, color)
   rgb_flow.add{type = "label", name = prefix .. "_preview", caption = color_swatch_caption(color, 6)}
 end
 
-local function build_research_bar_editor(player)
-  local window = player.gui.screen.chroma_research_window
-  if not window then return end
-  window.clear()
+local function build_bars_tab(player)
+  local content = tab_content(player, TAB_BARS)
+  if not content then return end
+  content.clear()
 
-  local draft = storage.chroma_research_draft[player.index]
-
-  window.add{
+  local rb_draft = storage.chroma_research_draft[player.index]
+  section_label(content, "Barre de recherche")
+  content.add{
     type = "checkbox", name = "chroma_rb_enabled_checkbox",
-    caption = "Activer la barre de recherche", state = (draft.enabled ~= false),
+    caption = "Activer la barre de recherche", state = (rb_draft.enabled ~= false),
   }
-
-  window.add{type = "label", caption = "Touches, dans l'ordre (la premiere = 0% de recherche, la derniere = 100%) :"}
-  local keys = draft.keys or {}
-  window.add{
+  content.add{type = "label", caption = "Touches, dans l'ordre (la premiere = 0% de recherche, la derniere = 100%) :"}
+  local rb_keys = rb_draft.keys or {}
+  content.add{
     type = "label", name = "chroma_rb_keys_summary_label",
-    caption = (#keys > 0) and table.concat(keys, ", ") or "(aucune touche -- la barre ne s'affichera pas)",
+    caption = (#rb_keys > 0) and table.concat(rb_keys, ", ") or "(aucune touche -- la barre ne s'affichera pas)",
   }
-  window.add{type = "button", name = "chroma_rb_open_picker_button", caption = "Choisir les touches (clavier virtuel)"}
+  content.add{type = "button", name = "chroma_rb_open_picker_button", caption = "Choisir les touches (clavier virtuel)"}
+  content.add{type = "label", caption = "Couleur des touches deja atteintes par la progression :"}
+  add_color_picker_widgets(content, "chroma_rb_bar", rb_draft.color_bar or {0, 255, 60})
+  content.add{type = "label", caption = "Couleur des touches pas encore atteintes :"}
+  add_color_picker_widgets(content, "chroma_rb_empty", rb_draft.color_empty or {20, 20, 20})
+  content.add{type = "button", name = "chroma_rb_apply_button", caption = "Appliquer la barre de recherche"}
 
-  window.add{type = "line"}
-  window.add{type = "label", caption = "Couleur des touches deja atteintes par la progression :"}
-  add_color_picker_widgets(window, "chroma_rb_bar", draft.color_bar or {0, 255, 60})
+  content.add{type = "line"}
 
-  window.add{type = "label", caption = "Couleur des touches pas encore atteintes :"}
-  add_color_picker_widgets(window, "chroma_rb_empty", draft.color_empty or {20, 20, 20})
-
-  window.add{type = "line"}
-  local bottom = window.add{type = "flow", direction = "horizontal"}
-  bottom.add{type = "button", name = "chroma_rb_apply_button", caption = "Appliquer"}
-  bottom.add{type = "button", name = "chroma_rb_close_button", caption = "Fermer"}
+  local hb_draft = storage.chroma_health_draft[player.index]
+  section_label(content, "Barre de vie")
+  content.add{
+    type = "checkbox", name = "chroma_hb_enabled_checkbox",
+    caption = "Activer la barre de vie", state = (hb_draft.enabled ~= false),
+  }
+  content.add{type = "label", caption = "Touches, dans l'ordre (la premiere = 0% de vie, la derniere = 100%) :"}
+  local hb_keys = hb_draft.keys or {}
+  content.add{
+    type = "label", name = "chroma_hb_keys_summary_label",
+    caption = (#hb_keys > 0) and table.concat(hb_keys, ", ") or "(aucune touche -- la barre ne s'affichera pas)",
+  }
+  content.add{type = "button", name = "chroma_hb_open_picker_button", caption = "Choisir les touches (clavier virtuel)"}
+  content.add{type = "label", caption = "Couleur des touches representant la vie restante :"}
+  add_color_picker_widgets(content, "chroma_hb_bar", hb_draft.color_bar or {0, 255, 0})
+  content.add{type = "label", caption = "Couleur des touches representant la vie perdue :"}
+  add_color_picker_widgets(content, "chroma_hb_empty", hb_draft.color_empty or {40, 0, 0})
+  content.add{type = "button", name = "chroma_hb_apply_button", caption = "Appliquer la barre de vie"}
 end
 
-function gui.toggle_research_bar_editor(player)
-  local screen = player.gui.screen
-  if screen.chroma_research_window then
-    screen.chroma_research_window.destroy()
-    return
-  end
-
+-- (Re)initialise les brouillons recherche/vie depuis la config actuelle du
+-- joueur et reconstruit l'onglet -- appele a l'ouverture de la fenetre et a
+-- chaque fois qu'on revient sur cet onglet (voir gui.on_selected_tab_changed).
+local function refresh_bars_tab(player)
   storage.chroma_research_draft = storage.chroma_research_draft or {}
   storage.chroma_research_draft[player.index] = deep_copy(player_mapping(player).research_bar)
-
-  local window = screen.add{
-    type = "frame", name = "chroma_research_window", direction = "vertical",
-    caption = "Chroma Bridge - Barre de recherche",
-  }
-  window.auto_center = true
-
-  build_research_bar_editor(player)
-end
-
--- --- Editeur de la barre de vie (touches ordonnees + couleurs) ---
--- Meme principe que la barre de recherche, dupplique plutot que factorise
--- pour eviter de fragiliser le code deja teste de l'editeur de recherche.
-
-local function build_health_bar_editor(player)
-  local window = player.gui.screen.chroma_health_window
-  if not window then return end
-  window.clear()
-
-  local draft = storage.chroma_health_draft[player.index]
-
-  window.add{
-    type = "checkbox", name = "chroma_hb_enabled_checkbox",
-    caption = "Activer la barre de vie", state = (draft.enabled ~= false),
-  }
-
-  window.add{type = "label", caption = "Touches, dans l'ordre (la premiere = 0% de vie, la derniere = 100%) :"}
-  local keys = draft.keys or {}
-  window.add{
-    type = "label", name = "chroma_hb_keys_summary_label",
-    caption = (#keys > 0) and table.concat(keys, ", ") or "(aucune touche -- la barre ne s'affichera pas)",
-  }
-  window.add{type = "button", name = "chroma_hb_open_picker_button", caption = "Choisir les touches (clavier virtuel)"}
-
-  window.add{type = "line"}
-  window.add{type = "label", caption = "Couleur des touches representant la vie restante :"}
-  add_color_picker_widgets(window, "chroma_hb_bar", draft.color_bar or {0, 255, 0})
-
-  window.add{type = "label", caption = "Couleur des touches representant la vie perdue :"}
-  add_color_picker_widgets(window, "chroma_hb_empty", draft.color_empty or {40, 0, 0})
-
-  window.add{type = "line"}
-  local bottom = window.add{type = "flow", direction = "horizontal"}
-  bottom.add{type = "button", name = "chroma_hb_apply_button", caption = "Appliquer"}
-  bottom.add{type = "button", name = "chroma_hb_close_button", caption = "Fermer"}
-end
-
-function gui.toggle_health_bar_editor(player)
-  local screen = player.gui.screen
-  if screen.chroma_health_window then
-    screen.chroma_health_window.destroy()
-    return
-  end
-
   storage.chroma_health_draft = storage.chroma_health_draft or {}
   storage.chroma_health_draft[player.index] = deep_copy(player_mapping(player).health_bar)
-
-  local window = screen.add{
-    type = "frame", name = "chroma_health_window", direction = "vertical",
-    caption = "Chroma Bridge - Barre de vie",
-  }
-  window.auto_center = true
-
-  build_health_bar_editor(player)
+  build_bars_tab(player)
 end
 
--- --- Editeur de la couleur par defaut du clavier (keyboard_idle) ---
+-- --- Onglet "Ambiance" (couleur par defaut du clavier/souris/tapis) ---
 -- Couleur affichee sur TOUTES les touches quand rien d'autre n'est actif
 -- (pas de recherche, pas de barre de vie, pas d'alerte clavier).
 
-local function build_default_color_editor(player)
-  local window = player.gui.screen.chroma_default_window
-  if not window then return end
-  window.clear()
+local function build_ambiance_tab(player)
+  local content = tab_content(player, TAB_AMBIANCE)
+  if not content then return end
+  content.clear()
 
   local draft = storage.chroma_default_draft[player.index]
 
-  window.add{type = "label", caption = "Couleur du clavier, de la souris et du tapis quand rien d'autre n'est actif :"}
-  add_color_picker_widgets(window, "chroma_kd_c1", draft.color1 or {230, 100, 20})
+  content.add{type = "label", caption = "Couleur du clavier, de la souris et du tapis quand rien d'autre n'est actif :"}
+  add_color_picker_widgets(content, "chroma_kd_c1", draft.color1 or {230, 100, 20})
 
-  window.add{type = "label", caption = "Deuxieme couleur (respiration, fondu vers celle-ci) :"}
-  add_color_picker_widgets(window, "chroma_kd_c2", draft.color2 or {20, 10, 0})
+  content.add{type = "label", caption = "Deuxieme couleur (respiration, fondu vers celle-ci) :"}
+  add_color_picker_widgets(content, "chroma_kd_c2", draft.color2 or {20, 10, 0})
 
-  window.add{type = "line"}
+  content.add{type = "line"}
   local speed = draft.breathing_speed or 3.0
-  window.add{type = "label", caption = "Vitesse de la respiration (duree d'un cycle complet) :"}
-  local speed_flow = window.add{type = "flow", direction = "horizontal"}
+  content.add{type = "label", caption = "Vitesse de la respiration (duree d'un cycle complet) :"}
+  local speed_flow = content.add{type = "flow", direction = "horizontal"}
   speed_flow.add{
     type = "slider", name = "chroma_kd_speed_slider",
     minimum_value = 5, maximum_value = 150, value = math.floor(speed * 10 + 0.5),
   }
   speed_flow.add{type = "label", name = "chroma_kd_speed_value_label", caption = string.format("%.1fs", speed)}
 
-  window.add{type = "line"}
-  window.add{
+  content.add{type = "line"}
+  content.add{
     type = "checkbox", name = "chroma_kd_ambient_checkbox",
     caption = "Reactif a l'etat de la partie (evolution des biters, pollution, jour/nuit)",
     state = draft.ambient_reactive or false,
   }
-  window.add{
+  content.add{
     type = "label",
     caption = "[color=150,150,150]Si coche, les deux couleurs ci-dessus sont ignorees : le clavier suit"
       .. " automatiquement l'ambiance (rouge si evolution elevee, jaune si pollution forte, bleu la nuit...).[/color]",
   }
 
-  window.add{type = "line"}
-  local bottom = window.add{type = "flow", direction = "horizontal"}
-  bottom.add{type = "button", name = "chroma_kd_apply_button", caption = "Appliquer"}
-  bottom.add{type = "button", name = "chroma_kd_close_button", caption = "Fermer"}
+  content.add{type = "line"}
+  content.add{type = "button", name = "chroma_kd_apply_button", caption = "Appliquer"}
 end
 
-function gui.toggle_default_color_editor(player)
-  local screen = player.gui.screen
-  if screen.chroma_default_window then
-    screen.chroma_default_window.destroy()
-    return
-  end
-
+local function refresh_ambiance_tab(player)
   storage.chroma_default_draft = storage.chroma_default_draft or {}
   local draft = deep_copy(player_mapping(player).keyboard_idle)
   if draft.ambient_reactive == nil then draft.ambient_reactive = false end
   if draft.breathing_speed == nil then draft.breathing_speed = 3.0 end
   storage.chroma_default_draft[player.index] = draft
-
-  local window = screen.add{
-    type = "frame", name = "chroma_default_window", direction = "vertical",
-    caption = "Chroma Bridge - Couleur par defaut du clavier",
-  }
-  window.auto_center = true
-
-  build_default_color_editor(player)
+  build_ambiance_tab(player)
 end
 
--- --- Explorateur d'evenements (lecture seule) ---
+-- --- Onglet "Explorateur" (lecture seule) ---
 
 local function is_wired(entry, player)
   if entry.kind == "event" then
@@ -760,10 +760,10 @@ local function matches_explorer_filter(entry, search, category)
   return true
 end
 
-local function build_explorer_list(player)
-  local window = player.gui.screen.chroma_explorer_window
-  if not window then return end
-  local list = window.chroma_explorer_list
+local function build_explorer_results(player)
+  local content = tab_content(player, TAB_EXPLORER)
+  if not content then return end
+  local list = content.chroma_explorer_list
   list.clear()
 
   local state = storage.chroma_explorer_state[player.index]
@@ -782,7 +782,7 @@ local function build_explorer_list(player)
           local wired_key = (entry.kind == "event") and entry.wired_key or entry.name
           list.add{
             type = "button", name = "chroma_explorer_goto__" .. entry.kind .. "__" .. wired_key,
-            caption = caption, tooltip = "Ouvrir dans l'onglet Configuration",
+            caption = caption, tooltip = "Ouvrir dans l'onglet Evenements & alertes",
           }
         else
           list.add{type = "label", caption = caption}
@@ -792,67 +792,76 @@ local function build_explorer_list(player)
   end
 
   local suffix = (shown > MAX_SHOWN) and (" (" .. MAX_SHOWN .. " premiers affiches, affine ta recherche)") or ""
-  window.chroma_explorer_count_label.caption = shown .. " resultat(s)" .. suffix
+  content.chroma_explorer_count_label.caption = shown .. " resultat(s)" .. suffix
 end
 
-function gui.toggle_explorer(player)
-  local screen = player.gui.screen
-  if screen.chroma_explorer_window then
-    screen.chroma_explorer_window.destroy()
-    return
-  end
+local function build_explorer_tab(player)
+  local content = tab_content(player, TAB_EXPLORER)
+  if not content then return end
+  content.clear()
 
   if not _catalog_cache then
     _catalog_cache = event_explorer.build_catalog()
   end
-  storage.chroma_explorer_state = storage.chroma_explorer_state or {}
-  storage.chroma_explorer_state[player.index] = {search = "", category = "Toutes"}
 
-  local window = screen.add{
-    type = "frame", name = "chroma_explorer_window", direction = "vertical",
-    caption = "Chroma Bridge - Explorateur d'evenements Factorio",
-  }
-  window.auto_center = true
-
-  local filters = window.add{type = "flow", direction = "horizontal"}
+  local filters = content.add{type = "flow", direction = "horizontal"}
   filters.add{type = "label", caption = "Recherche :"}
   filters.add{type = "textfield", name = "chroma_explorer_search"}
   filters.add{type = "label", caption = "Categorie :"}
   local cat_dd = filters.add{type = "drop-down", name = "chroma_explorer_category_dropdown", items = event_explorer.categories(_catalog_cache)}
   cat_dd.selected_index = 1
 
-  window.add{
+  content.add{
     type = "label",
-    caption = "[color=150,150,150]Vert = deja relie a un effet Chroma (clique pour l'ouvrir dans Configuration). "
-      .. "Le reste est juste pour reference -- dis quels events t'interessent pour qu'on les cable.[/color]",
+    caption = "[color=150,150,150]Vert = deja relie a un effet Chroma (clique pour l'ouvrir dans Evenements & "
+      .. "alertes). Le reste est juste pour reference -- dis quels events t'interessent pour qu'on les cable.[/color]",
   }
 
-  local list_scroll = window.add{type = "scroll-pane", name = "chroma_explorer_list", direction = "vertical"}
-  list_scroll.style.minimal_width = 520
+  local list_scroll = content.add{type = "scroll-pane", name = "chroma_explorer_list", direction = "vertical"}
+  list_scroll.style.minimal_width = 560
   list_scroll.style.maximal_height = 420
 
-  window.add{type = "label", name = "chroma_explorer_count_label", caption = ""}
+  content.add{type = "label", name = "chroma_explorer_count_label", caption = ""}
 
-  local bottom = window.add{type = "flow", direction = "horizontal"}
-  bottom.add{type = "button", name = "chroma_explorer_close_button", caption = "Fermer"}
-
-  build_explorer_list(player)
+  build_explorer_results(player)
 end
 
--- --- Alertes personnalisees (haut-parleurs programmables) ---
--- Onglet dedie pour ajouter/supprimer des "watches" : {id, label, match_text}.
--- Une fois ajoutee, chaque watch apparait dans la liste principale
--- (build_list, cle "custom_<id>") pour choisir couleur/device/priorite avec
--- l'editeur d'alertes generique existant -- aucun code Python necessaire,
--- count_custom_alert_watches (control.lua) alimente alerts_by_type comme
--- n'importe quelle autre alerte.
-local function build_watches_editor(player)
-  local window = player.gui.screen.chroma_watches_window
-  if not window then return end
-  local list = window.chroma_watches_list
-  list.clear()
+local function refresh_explorer_tab(player)
+  storage.chroma_explorer_state = storage.chroma_explorer_state or {}
+  storage.chroma_explorer_state[player.index] = {search = "", category = "Toutes"}
+  build_explorer_tab(player)
+end
+
+-- --- Onglet "Alertes personnalisees" (haut-parleurs programmables) ---
+-- Ajoute/supprime des "watches" : {id, label, match_text}. Une fois
+-- ajoutee, chaque watch apparait dans l'onglet Evenements & alertes (cle
+-- "custom_<id>") pour choisir couleur/device/priorite avec l'editeur
+-- generique existant -- aucun code Python necessaire, count_custom_alert_
+-- watches (control.lua) alimente alerts_by_type comme n'importe quelle
+-- autre alerte.
+
+local function build_watches_tab(player)
+  local content = tab_content(player, TAB_WATCHES)
+  if not content then return end
+  content.clear()
+
+  content.add{
+    type = "label",
+    caption = "[color=150,150,150]Detecte le message d'un haut-parleur programmable (case 'Alerte' cochee + texte "
+      .. "libre, ex: 'Automall Frozen!!'). La correspondance ignore la casse et cherche le texte n'importe ou dans "
+      .. "le message. Une fois appliquee, la watch apparait dans Evenements & alertes pour choisir sa couleur.[/color]",
+  }
+
+  local list_scroll = content.add{type = "scroll-pane", name = "chroma_watches_list", direction = "vertical"}
+  list_scroll.style.minimal_width = 560
+  list_scroll.style.maximal_height = 300
+
+  local bottom = content.add{type = "flow", direction = "horizontal"}
+  bottom.add{type = "button", name = "chroma_watch_add_button", caption = "+ Ajouter une alerte"}
+  bottom.add{type = "button", name = "chroma_watches_apply_button", caption = "Appliquer"}
 
   local draft = storage.chroma_watches_draft[player.index]
+  local list = content.chroma_watches_list
   for i, watch in ipairs(draft) do
     local row = list.add{type = "flow", name = "chroma_watch_row__" .. i, direction = "horizontal"}
     row.add{type = "label", caption = "Nom :"}
@@ -862,64 +871,35 @@ local function build_watches_editor(player)
     match_field.style.minimal_width = 200
     row.add{type = "button", name = "chroma_watch_remove__" .. i, caption = "Supprimer"}
   end
-
   if #draft == 0 then
     list.add{type = "label", caption = "(aucune alerte personnalisee pour l'instant)"}
   end
 end
 
-function gui.toggle_watches_editor(player)
-  local screen = player.gui.screen
-  if screen.chroma_watches_window then
-    screen.chroma_watches_window.destroy()
-    return
-  end
-
+local function refresh_watches_tab(player)
   storage.chroma_watches_draft = storage.chroma_watches_draft or {}
   storage.chroma_watches_draft[player.index] = deep_copy(player_mapping(player).custom_alert_watches or {})
-
-  local window = screen.add{
-    type = "frame", name = "chroma_watches_window", direction = "vertical",
-    caption = "Chroma Bridge - Alertes personnalisees",
-  }
-  window.auto_center = true
-
-  window.add{
-    type = "label",
-    caption = "[color=150,150,150]Detecte le message d'un haut-parleur programmable (case 'Alerte' cochee + texte "
-      .. "libre, ex: 'Automall Frozen!!'). La correspondance ignore la casse et cherche le texte n'importe ou dans "
-      .. "le message. Une fois appliquee, la watch apparait dans Configuration pour choisir sa couleur.[/color]",
-  }
-
-  local list_scroll = window.add{type = "scroll-pane", name = "chroma_watches_list", direction = "vertical"}
-  list_scroll.style.minimal_width = 560
-  list_scroll.style.maximal_height = 300
-
-  local bottom = window.add{type = "flow", direction = "horizontal"}
-  bottom.add{type = "button", name = "chroma_watch_add_button", caption = "+ Ajouter une alerte"}
-  bottom.add{type = "button", name = "chroma_watches_apply_button", caption = "Appliquer"}
-  bottom.add{type = "button", name = "chroma_watches_close_button", caption = "Fermer"}
-
-  build_watches_editor(player)
+  build_watches_tab(player)
 end
 
--- --- Export / import de la config du joueur ---
+-- --- Onglet "Export / Import" ---
 -- Toute la config personnelle (layout, couleurs, alertes, alertes perso...)
 -- vit dans un seul objet (player_mapping(player)) -- l'exporter/l'importer
 -- se resume donc a le (de)serialiser en JSON. Utile pour sauvegarder sa
 -- config avant de la modifier, ou la partager/recopier sur une autre partie
 -- sans tout re-cliquer a la main dans l'interface.
-local function build_export_editor(player)
-  local window = player.gui.screen.chroma_export_window
-  if not window then return end
-  window.clear()
 
-  window.add{
+local function build_export_tab(player)
+  local content = tab_content(player, TAB_EXPORT)
+  if not content then return end
+  content.clear()
+
+  content.add{
     type = "label",
     caption = "[color=150,150,150]Ta configuration actuelle, en JSON -- selectionne le texte "
       .. "(Ctrl+A puis Ctrl+C) et garde-le de cote pour la restaurer plus tard ou la partager.[/color]",
   }
-  local export_field = window.add{
+  local export_field = content.add{
     type = "text-box", name = "chroma_export_output",
     text = helpers.table_to_json(player_mapping(player)),
     read_only = true, word_wrap = true,
@@ -927,37 +907,21 @@ local function build_export_editor(player)
   export_field.style.minimal_width = 560
   export_field.style.minimal_height = 140
 
-  window.add{type = "line"}
-  window.add{
+  content.add{type = "line"}
+  content.add{
     type = "label",
     caption = "[color=150,150,150]Colle ici une configuration exportee (la tienne ou celle d'un autre "
       .. "joueur) puis clique Importer -- ca REMPLACE entierement ta configuration actuelle.[/color]",
   }
-  local import_field = window.add{type = "text-box", name = "chroma_import_input", text = "", word_wrap = true}
+  local import_field = content.add{type = "text-box", name = "chroma_import_input", text = "", word_wrap = true}
   import_field.style.minimal_width = 560
   import_field.style.minimal_height = 140
 
-  window.add{type = "line"}
-  local bottom = window.add{type = "flow", direction = "horizontal"}
-  bottom.add{type = "button", name = "chroma_import_button", caption = "Importer"}
-  bottom.add{type = "button", name = "chroma_export_close_button", caption = "Fermer"}
+  content.add{type = "line"}
+  content.add{type = "button", name = "chroma_import_button", caption = "Importer"}
 end
 
-function gui.toggle_export_editor(player)
-  local screen = player.gui.screen
-  if screen.chroma_export_window then
-    screen.chroma_export_window.destroy()
-    return
-  end
-
-  local window = screen.add{
-    type = "frame", name = "chroma_export_window", direction = "vertical",
-    caption = "Chroma Bridge - Exporter / Importer",
-  }
-  window.auto_center = true
-
-  build_export_editor(player)
-end
+-- --- Fenetre principale ---
 
 function gui.toggle(player)
   local screen = player.gui.screen
@@ -967,7 +931,7 @@ function gui.toggle(player)
     return
   end
 
-  local window = screen.add{type = "frame", name = "chroma_bridge_window", direction = "vertical", caption = "Chroma Bridge - Configuration"}
+  local window = screen.add{type = "frame", name = "chroma_bridge_window", direction = "vertical", caption = "Chroma Bridge"}
   window.auto_center = true
 
   local top = window.add{type = "flow", direction = "horizontal"}
@@ -975,29 +939,78 @@ function gui.toggle(player)
   local layout_dd = top.add{type = "drop-down", name = "chroma_layout_dropdown", items = {"AZERTY (France)", "QWERTY (US)"}}
   layout_dd.selected_index = (current_layout_name(player) == "qwerty_us") and 2 or 1
 
-  local body = window.add{type = "flow", name = "chroma_body", direction = "horizontal"}
-  body.style.horizontal_spacing = 12
+  local pane = window.add{type = "tabbed-pane", name = "chroma_tabbed_pane"}
 
-  local list_scroll = body.add{type = "scroll-pane", name = "chroma_list_scroll", direction = "vertical"}
-  list_scroll.style.minimal_width = 280
-  list_scroll.style.maximal_height = 480
-  build_list(list_scroll, player)
+  local tab_config = pane.add{type = "tab", caption = "Evenements & alertes"}
+  local content_config = pane.add{type = "flow", direction = "horizontal"}
+  pane.add_tab(tab_config, content_config)
 
-  local detail = body.add{type = "flow", name = "chroma_detail_flow", direction = "vertical"}
-  detail.style.minimal_width = 320
-  detail.add{type = "label", caption = "Selectionne un evenement ou une alerte a gauche."}
+  local tab_bars = pane.add{type = "tab", caption = "Recherche & Vie"}
+  local content_bars = pane.add{type = "flow", direction = "vertical"}
+  content_bars.style.minimal_width = 620
+  pane.add_tab(tab_bars, content_bars)
+
+  local tab_ambiance = pane.add{type = "tab", caption = "Ambiance"}
+  local content_ambiance = pane.add{type = "flow", direction = "vertical"}
+  content_ambiance.style.minimal_width = 620
+  pane.add_tab(tab_ambiance, content_ambiance)
+
+  local tab_watches = pane.add{type = "tab", caption = "Alertes personnalisees"}
+  local content_watches = pane.add{type = "flow", direction = "vertical"}
+  content_watches.style.minimal_width = 620
+  pane.add_tab(tab_watches, content_watches)
+
+  local tab_explorer = pane.add{type = "tab", caption = "Explorateur"}
+  local content_explorer = pane.add{type = "flow", direction = "vertical"}
+  content_explorer.style.minimal_width = 620
+  pane.add_tab(tab_explorer, content_explorer)
+
+  local tab_export = pane.add{type = "tab", caption = "Export / Import"}
+  local content_export = pane.add{type = "flow", direction = "vertical"}
+  content_export.style.minimal_width = 620
+  pane.add_tab(tab_export, content_export)
+
+  pane.selected_tab_index = TAB_CONFIG
 
   window.add{type = "line"}
   local bottom = window.add{type = "flow", direction = "horizontal"}
   bottom.add{type = "button", name = "chroma_close_button", caption = "Fermer"}
-  bottom.add{type = "button", name = "chroma_open_explorer_button", caption = "Explorateur d'evenements"}
-  bottom.add{type = "button", name = "chroma_open_research_button", caption = "Barre de recherche"}
-  bottom.add{type = "button", name = "chroma_open_health_button", caption = "Barre de vie"}
-  bottom.add{type = "button", name = "chroma_open_default_button", caption = "Couleur par defaut"}
-  bottom.add{type = "button", name = "chroma_open_watches_button", caption = "Alertes personnalisees"}
-  bottom.add{type = "button", name = "chroma_open_export_button", caption = "Exporter / Importer"}
 
   player.opened = window
+
+  -- Construit tous les onglets tout de suite (pas paresseusement au premier
+  -- clic) : chacun est peu couteux (quelques deep_copy + une poignee de
+  -- widgets), et ca evite un onglet vide le temps d'un premier changement.
+  build_config_tab(player)
+  refresh_bars_tab(player)
+  refresh_ambiance_tab(player)
+  refresh_watches_tab(player)
+  refresh_explorer_tab(player)
+  build_export_tab(player)
+end
+
+-- Rafraichit un onglet a chaque fois qu'on y revient (meme logique qu'avant
+-- quand chaque onglet etait sa propre fenetre, rouverte fraiche a chaque
+-- clic) : capte par exemple un changement fait ailleurs (import d'une
+-- config complete depuis l'onglet Export/Import) qui ne serait sinon visible
+-- qu'apres avoir ferme/rouvert toute la fenetre.
+function gui.on_selected_tab_changed(event)
+  local element = event.element
+  if not (element and element.valid and element.name == "chroma_tabbed_pane") then return end
+  local player = game.get_player(event.player_index)
+  local index = element.selected_tab_index
+
+  if index == TAB_BARS then
+    refresh_bars_tab(player)
+  elseif index == TAB_AMBIANCE then
+    refresh_ambiance_tab(player)
+  elseif index == TAB_WATCHES then
+    refresh_watches_tab(player)
+  elseif index == TAB_EXPLORER then
+    refresh_explorer_tab(player)
+  elseif index == TAB_EXPORT then
+    build_export_tab(player)
+  end
 end
 
 function gui.on_click(event)
@@ -1043,23 +1056,6 @@ function gui.on_click(event)
     return
   end
 
-  if name == "chroma_open_explorer_button" then
-    gui.toggle_explorer(player)
-    return
-  end
-
-  if name == "chroma_open_research_button" then
-    gui.toggle_research_bar_editor(player)
-    return
-  end
-
-  if name == "chroma_rb_close_button" then
-    if player.gui.screen.chroma_research_window then
-      player.gui.screen.chroma_research_window.destroy()
-    end
-    return
-  end
-
   if name == "chroma_rb_open_picker_button" then
     gui.toggle_keyboard_picker(player, "research_bar")
     return
@@ -1080,7 +1076,7 @@ function gui.on_click(event)
     local draft = storage.chroma_research_draft[player.index]
     if draft then
       draft.color_bar = deep_copy(COLOR_PRESETS[tonumber(rb_bar_preset)])
-      build_research_bar_editor(player)
+      build_bars_tab(player)
     end
     return
   end
@@ -1090,19 +1086,7 @@ function gui.on_click(event)
     local draft = storage.chroma_research_draft[player.index]
     if draft then
       draft.color_empty = deep_copy(COLOR_PRESETS[tonumber(rb_empty_preset)])
-      build_research_bar_editor(player)
-    end
-    return
-  end
-
-  if name == "chroma_open_health_button" then
-    gui.toggle_health_bar_editor(player)
-    return
-  end
-
-  if name == "chroma_hb_close_button" then
-    if player.gui.screen.chroma_health_window then
-      player.gui.screen.chroma_health_window.destroy()
+      build_bars_tab(player)
     end
     return
   end
@@ -1127,7 +1111,7 @@ function gui.on_click(event)
     local draft = storage.chroma_health_draft[player.index]
     if draft then
       draft.color_bar = deep_copy(COLOR_PRESETS[tonumber(hb_bar_preset)])
-      build_health_bar_editor(player)
+      build_bars_tab(player)
     end
     return
   end
@@ -1137,19 +1121,7 @@ function gui.on_click(event)
     local draft = storage.chroma_health_draft[player.index]
     if draft then
       draft.color_empty = deep_copy(COLOR_PRESETS[tonumber(hb_empty_preset)])
-      build_health_bar_editor(player)
-    end
-    return
-  end
-
-  if name == "chroma_open_default_button" then
-    gui.toggle_default_color_editor(player)
-    return
-  end
-
-  if name == "chroma_kd_close_button" then
-    if player.gui.screen.chroma_default_window then
-      player.gui.screen.chroma_default_window.destroy()
+      build_bars_tab(player)
     end
     return
   end
@@ -1176,7 +1148,7 @@ function gui.on_click(event)
     local draft = storage.chroma_default_draft[player.index]
     if draft then
       draft.color1 = deep_copy(COLOR_PRESETS[tonumber(kd_c1_preset)])
-      build_default_color_editor(player)
+      build_ambiance_tab(player)
     end
     return
   end
@@ -1186,19 +1158,7 @@ function gui.on_click(event)
     local draft = storage.chroma_default_draft[player.index]
     if draft then
       draft.color2 = deep_copy(COLOR_PRESETS[tonumber(kd_c2_preset)])
-      build_default_color_editor(player)
-    end
-    return
-  end
-
-  if name == "chroma_open_watches_button" then
-    gui.toggle_watches_editor(player)
-    return
-  end
-
-  if name == "chroma_watches_close_button" then
-    if player.gui.screen.chroma_watches_window then
-      player.gui.screen.chroma_watches_window.destroy()
+      build_ambiance_tab(player)
     end
     return
   end
@@ -1210,7 +1170,7 @@ function gui.on_click(event)
       local id = mapping.next_watch_id or 1
       mapping.next_watch_id = id + 1
       table.insert(draft, {id = id, label = "", match_text = ""})
-      build_watches_editor(player)
+      build_watches_tab(player)
     end
     return
   end
@@ -1220,7 +1180,7 @@ function gui.on_click(event)
     local draft = storage.chroma_watches_draft[player.index]
     if draft then
       table.remove(draft, tonumber(remove_index))
-      build_watches_editor(player)
+      build_watches_tab(player)
     end
     return
   end
@@ -1243,28 +1203,17 @@ function gui.on_click(event)
       mapping.custom_alert_watches = deep_copy(draft)
       write_mapping_file(player)
       player.print("Chroma Bridge : alertes personnalisees mises a jour.")
-      if player.gui.screen.chroma_bridge_window then
-        build_list(player.gui.screen.chroma_bridge_window.chroma_body.chroma_list_scroll, player)
+      local config_content = tab_content(player, TAB_CONFIG)
+      if config_content then
+        build_list(config_content.chroma_list_scroll, player)
       end
     end
     return
   end
 
-  if name == "chroma_open_export_button" then
-    gui.toggle_export_editor(player)
-    return
-  end
-
-  if name == "chroma_export_close_button" then
-    if player.gui.screen.chroma_export_window then
-      player.gui.screen.chroma_export_window.destroy()
-    end
-    return
-  end
-
   if name == "chroma_import_button" then
-    local window = player.gui.screen.chroma_export_window
-    local field = window and window.chroma_import_input
+    local content = tab_content(player, TAB_EXPORT)
+    local field = content and content.chroma_import_input
     local text = field and field.text or ""
     if text == "" then
       player.print("Chroma Bridge : rien a importer (colle une configuration d'abord).")
@@ -1284,28 +1233,24 @@ function gui.on_click(event)
     write_mapping_file(player)
     player.print("Chroma Bridge : configuration importee.")
     if field then field.text = "" end
-    if player.gui.screen.chroma_bridge_window then
-      build_list(player.gui.screen.chroma_bridge_window.chroma_body.chroma_list_scroll, player)
-    end
-    return
-  end
-
-  if name == "chroma_explorer_close_button" then
-    if player.gui.screen.chroma_explorer_window then
-      player.gui.screen.chroma_explorer_window.destroy()
+    local config_content = tab_content(player, TAB_CONFIG)
+    if config_content then
+      build_list(config_content.chroma_list_scroll, player)
     end
     return
   end
 
   local ekind, ekey = name:match("^chroma_explorer_goto__(%a+)__(.+)$")
   if ekind and ekey then
-    local section = (ekind == "event") and "events" or "alerts"
-    select_item(player, section, ekey)
+    local section2 = (ekind == "event") and "events" or "alerts"
+    select_item(player, section2, ekey)
     if not player.gui.screen.chroma_bridge_window then
       gui.toggle(player)
     end
     build_detail(player)
-    player.print("Chroma Bridge : '" .. ekey .. "' ouvert dans l'onglet Configuration.")
+    local pane = player.gui.screen.chroma_bridge_window and player.gui.screen.chroma_bridge_window.chroma_tabbed_pane
+    if pane then pane.selected_tab_index = TAB_CONFIG end
+    player.print("Chroma Bridge : '" .. ekey .. "' ouvert dans l'onglet Evenements & alertes.")
     return
   end
 
@@ -1339,7 +1284,7 @@ function gui.on_click(event)
       if player.gui.screen.chroma_keyboard_picker_window then
         player.gui.screen.chroma_keyboard_picker_window.destroy()
       end
-      build_research_bar_editor(player)
+      build_bars_tab(player)
     elseif target == "health_bar" then
       local hb_draft = storage.chroma_health_draft[player.index]
       if hb_draft then
@@ -1348,7 +1293,7 @@ function gui.on_click(event)
       if player.gui.screen.chroma_keyboard_picker_window then
         player.gui.screen.chroma_keyboard_picker_window.destroy()
       end
-      build_health_bar_editor(player)
+      build_bars_tab(player)
     else
       local draft = storage.chroma_draft[player.index]
       if draft then
@@ -1431,7 +1376,7 @@ function gui.on_selection_state_changed(event)
   if element.name == "chroma_explorer_category_dropdown" then
     local categories = event_explorer.categories(_catalog_cache)
     storage.chroma_explorer_state[player.index].category = categories[element.selected_index]
-    build_explorer_list(player)
+    build_explorer_results(player)
     return
   end
 
@@ -1463,7 +1408,7 @@ function gui.on_text_changed(event)
 
   if element.name == "chroma_explorer_search" then
     storage.chroma_explorer_state[player.index].search = element.text
-    build_explorer_list(player)
+    build_explorer_results(player)
     return
   end
 
@@ -1505,7 +1450,7 @@ function gui.on_value_changed(event)
       if name == "chroma_rb_bar_slider_r" then rb_draft.color_bar[1] = value end
       if name == "chroma_rb_bar_slider_g" then rb_draft.color_bar[2] = value end
       if name == "chroma_rb_bar_slider_b" then rb_draft.color_bar[3] = value end
-      build_research_bar_editor(player)
+      build_bars_tab(player)
     end
     return
   end
@@ -1517,7 +1462,7 @@ function gui.on_value_changed(event)
       if name == "chroma_rb_empty_slider_r" then rb_draft.color_empty[1] = value end
       if name == "chroma_rb_empty_slider_g" then rb_draft.color_empty[2] = value end
       if name == "chroma_rb_empty_slider_b" then rb_draft.color_empty[3] = value end
-      build_research_bar_editor(player)
+      build_bars_tab(player)
     end
     return
   end
@@ -1529,7 +1474,7 @@ function gui.on_value_changed(event)
       if name == "chroma_hb_bar_slider_r" then hb_draft.color_bar[1] = value end
       if name == "chroma_hb_bar_slider_g" then hb_draft.color_bar[2] = value end
       if name == "chroma_hb_bar_slider_b" then hb_draft.color_bar[3] = value end
-      build_health_bar_editor(player)
+      build_bars_tab(player)
     end
     return
   end
@@ -1541,7 +1486,7 @@ function gui.on_value_changed(event)
       if name == "chroma_hb_empty_slider_r" then hb_draft.color_empty[1] = value end
       if name == "chroma_hb_empty_slider_g" then hb_draft.color_empty[2] = value end
       if name == "chroma_hb_empty_slider_b" then hb_draft.color_empty[3] = value end
-      build_health_bar_editor(player)
+      build_bars_tab(player)
     end
     return
   end
@@ -1553,7 +1498,7 @@ function gui.on_value_changed(event)
       if name == "chroma_kd_c1_slider_r" then kd_draft.color1[1] = value end
       if name == "chroma_kd_c1_slider_g" then kd_draft.color1[2] = value end
       if name == "chroma_kd_c1_slider_b" then kd_draft.color1[3] = value end
-      build_default_color_editor(player)
+      build_ambiance_tab(player)
     end
     return
   end
@@ -1565,7 +1510,7 @@ function gui.on_value_changed(event)
       if name == "chroma_kd_c2_slider_r" then kd_draft.color2[1] = value end
       if name == "chroma_kd_c2_slider_g" then kd_draft.color2[2] = value end
       if name == "chroma_kd_c2_slider_b" then kd_draft.color2[3] = value end
-      build_default_color_editor(player)
+      build_ambiance_tab(player)
     end
     return
   end
@@ -1574,7 +1519,7 @@ function gui.on_value_changed(event)
     local kd_draft = storage.chroma_default_draft[player.index]
     if kd_draft then
       kd_draft.breathing_speed = value / 10
-      build_default_color_editor(player)
+      build_ambiance_tab(player)
     end
     return
   end

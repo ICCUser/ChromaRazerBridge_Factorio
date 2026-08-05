@@ -416,3 +416,4 @@ script.on_event(defines.events.on_gui_selection_state_changed, safe_gui_handler(
 script.on_event(defines.events.on_gui_text_changed, safe_gui_handler(gui.on_text_changed))
 script.on_event(defines.events.on_gui_value_changed, safe_gui_handler(gui.on_value_changed))
 script.on_event(defines.events.on_gui_closed, safe_gui_handler(gui.on_closed))
+script.on_event(defines.events.on_gui_selected_tab_changed, safe_gui_handler(gui.on_selected_tab_changed))
