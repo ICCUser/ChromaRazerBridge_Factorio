@@ -28,7 +28,8 @@ Prerequis (Windows) :
 Prerequis (Linux) :
   pip install openrazer
   openrazer-daemon installe, lance, utilisateur dans le groupe 'plugdev'.
-  Voir README.md pour le detail et les limites connues (code non teste).
+  Voir README.md pour le detail et les quelques details d'implementation
+  non confirmes (section "Linux : details non confirmes").
 """
 
 import signal

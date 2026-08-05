@@ -105,9 +105,8 @@ Synapse doit tourner, Factorio n'est pas necessaire pour cette etape.
 
 ### Linux
 
-**Implemente mais NON TESTE sur materiel reel** (voir
-["Linux : pas encore valide"](#linux--pas-encore-valide) plus bas pour le
-detail). Les memes grandes etapes s'appliquent :
+Fonctionne via [OpenRazer](https://openrazer.github.io/). Memes grandes
+etapes que sous Windows :
 
 1. Installe [OpenRazer](https://openrazer.github.io/#download) (paquet de ta
    distro, ou PPA/AUR) et verifie que le service `openrazer-daemon` tourne.
@@ -152,6 +151,10 @@ detail). Les memes grandes etapes s'appliquent :
   (`python main.py`) tourne bien et affiche "Session ouverte", (2) Synapse
   (Windows) ou `openrazer-daemon` (Linux) tourne, (3) le mod est bien coche
   actif dans la liste des mods Factorio.
+- Autre probleme : ouvre un ticket sur
+  [GitHub](https://github.com/ICCUser/ChromaRazerBridge_Factorio/issues) ou
+  laisse un commentaire sur la
+  [page du mod](https://mods.factorio.com/mod/chroma-bridge).
 
 ---
 
@@ -208,31 +211,24 @@ manuelle qui a suivi). Pour publier une nouvelle version :
    chaque changement (meme juste une image ou un texte de description) exige
    un nouveau numero.
 
-### Linux : pas encore valide
+### Linux : details non confirmes
 
-Le code a ete ecrit contre l'API officielle documentee/exemples du depot
-[openrazer/openrazer](https://github.com/openrazer/openrazer), mais n'a
-jamais tourne en conditions reelles (aucune machine Linux + materiel Razer
-disponible pendant le developpement) -- attends-toi a devoir corriger deux ou
-trois choses au premier essai, avec la meme methode que cote Windows (isoler
-le probleme avec un test direct plutot que deviner).
-
-Limites connues / a verifier en premier :
+Le client Linux (`chroma_client_linux.py`) fonctionne, mais trois details
+d'implementation precis n'ont pas ete verifies un par un -- utile a savoir
+si un bug tres specifique remonte un jour sur l'un de ces points :
 
 - La correspondance appareil OpenRazer <-> nos noms (`mousepad`/`chromalink`
-  -> `mousemat` cote OpenRazer) est faite par `device.type`, jamais verifiee
-  en conditions reelles.
+  -> `mousemat` cote OpenRazer) est faite par `device.type`.
 - La signature exacte de `breath_dual()` (couleur de respiration a deux
   teintes) est reconstruite par deduction (6 parametres, 2 couleurs RGB
-  completes) a partir d'une source partiellement illisible -- a confirmer.
+  completes) a partir d'une source partiellement illisible.
 - `custom_keyboard()` suppose que la matrice avancee OpenRazer (`fx.advanced`)
   utilise la meme disposition de grille que le SDK Windows ; les dimensions
   reelles (`adv.rows`/`adv.cols`) peuvent differer et sont tronquees au plus
-  petit des deux cote code, mais l'alignement touche par touche n'est pas
-  garanti tant que non teste -- meme demarche que `calibrate.py` a prevoir.
+  petit des deux cote code.
 
-Voir [TESTING_LINUX.md](TESTING_LINUX.md) pour une checklist detaillee de
-validation sur materiel reel.
+Voir [TESTING_LINUX.md](TESTING_LINUX.md) pour une methode pour isoler un
+souci sur l'un de ces points precis.
 
 ### Structure du projet
 
@@ -240,7 +236,7 @@ validation sur materiel reel.
 |---|---|
 | `main.py` | Boucle principale : lit l'etat du jeu, pilote le Chroma SDK (choisit le client Windows/Linux) |
 | `chroma_client.py` | Client REST pour le SDK Chroma Windows/Synapse |
-| `chroma_client_linux.py` | Client OpenRazer pour Linux (meme interface, non teste) |
+| `chroma_client_linux.py` | Client OpenRazer pour Linux (meme interface) |
 | `mapping.json` | Config par defaut (evenements/alertes -> appareil/couleur/effet) |
 | `mapping_loader.py` | Charge/fusionne `mapping.json` + les overrides ecrits par le jeu |
 | `keyboard_layout.py` | Correspondance touche/zone -> position sur la grille Chroma (AZERTY/QWERTY), basee sur les constantes RZKEY officielles de Razer |

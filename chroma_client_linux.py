@@ -14,13 +14,13 @@ Prerequis :
   officiel OpenRazer), utilisateur ajoute au groupe 'plugdev', puis
   se reconnecter (logout/login) pour que le groupe soit pris en compte.
 
-ATTENTION : code non teste (aucune machine Linux + materiel Razer disponible
-pendant le developpement). API verifiee contre les exemples officiels du
-depot openrazer/openrazer (examples/advanced_effect.py,
-examples/custom_zones.py, pylib/openrazer/client/fx.py) mais jamais executee
-en conditions reelles. A tester avec les memes precautions que diagnose.py
-cote Windows : commencer par un test isole (static rouge sur chaque
-peripherique) avant de faire confiance a l'integration complete.
+Valide sur materiel reel par Ibalek depuis la 1.4.1 (clavier/souris/tapis
+s'allument et reagissent correctement). Quelques details precis n'ont
+neanmoins pas ete verifies un par un -- voir README.md, section "Linux :
+details non confirmes" : signature exacte de breath_dual(), correspondance
+mousepad/chromalink -> mousemat, alignement touche par touche de la matrice
+avancee. En cas de souci sur l'un de ces points precis, meme methode que
+diagnose.py cote Windows : isoler avec un test direct plutot que deviner.
 """
 
 from openrazer.client import DeviceManager
