@@ -101,18 +101,25 @@ function explorer.mod_of_icon(icon_path)
   return icon_path:match("^__(.-)__") or "inconnu"
 end
 
+-- Fermeture nommee (definie une seule fois) plutot qu'une fonction anonyme
+-- recreee a chaque appel de mod_of() : count_player_alerts (control.lua)
+-- appelle mod_of() pour CHAQUE alerte active, potentiellement des dizaines
+-- par seconde et par joueur sous attaque -- pas la peine d'allouer une
+-- nouvelle closure a chaque fois.
+local function _icon_of(obj)
+  if not obj then return nil end
+  if obj.icon then return obj.icon end
+  if obj.icons and obj.icons[1] then return obj.icons[1].icon end
+  return nil
+end
+
 -- Marche pour une entite, un prototype, une technologie, un item stack...
 -- n'importe quel objet exposant .icon ou .icons (meme forme dans l'API
 -- Factorio pour tous ces types). pcall : certains objets n'exposent pas ces
 -- champs, ou sont invalides au moment de l'appel (entite detruite entre
 -- l'evenement et la lecture par exemple).
 function explorer.mod_of(obj)
-  local ok, icon = pcall(function()
-    if not obj then return nil end
-    if obj.icon then return obj.icon end
-    if obj.icons and obj.icons[1] then return obj.icons[1].icon end
-    return nil
-  end)
+  local ok, icon = pcall(_icon_of, obj)
   if not ok then return "inconnu" end
   return explorer.mod_of_icon(icon)
 end

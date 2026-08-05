@@ -24,7 +24,21 @@ local event_explorer = require("event_explorer")
 
 local POLL_INTERVAL_TICKS = 60 -- 1x par seconde (60 ticks = 1s a vitesse normale)
 local TRAIN_SCAN_INTERVAL_TICKS = 6 -- ~0.1s : alerte de securite, doit reagir plus vite que le statut general
+local POWER_SCAN_INTERVAL_TICKS = 180 -- ~3s : contrairement au train (danger immediat), une coupure de
+                                       -- courant n'a pas besoin d'etre detectee a la seconde pres --
+                                       -- ce scan reste le plus couteux du mod meme apres filtre de
+                                       -- type/rayon (voir POWER_SCAN_RADIUS), l'espacer du reste du
+                                       -- statut (POLL_INTERVAL_TICKS) divise d'autant sa contribution
+                                       -- totale au temps de frame. Resultat mis en cache
+                                       -- (storage.chroma_power_cache) et relu par write_status.
 local CRAFT_EVENT_MIN_INTERVAL = 30 -- ticks (~0.5s) entre deux "item_crafted" pour eviter le spam
+local MAPPING_SELF_REPAIR_INTERVAL_TICKS = 60 * 15 -- ~15s : gui.ensure_mapping_files() re-ecrit
+                                                    -- chroma_mapping.json de chaque joueur, uniquement
+                                                    -- pour se reparer si le fichier a disparu -- pas
+                                                    -- besoin que ce filet de securite tourne aussi
+                                                    -- souvent que le reste du statut, ca ne faisait que
+                                                    -- (de)serialiser en JSON et reecrire sur disque pour
+                                                    -- rien la quasi-totalite du temps.
 local EVENTS_RESET_INTERVAL_TICKS = 60 * 60 * 10 -- ~10 min a vitesse normale : purge periodique de
                                                   -- chroma_events.jsonl (seul fichier en ecriture
                                                   -- "append") pour qu'une session tres longue (8h+,
@@ -42,10 +56,13 @@ local last_craft_event_tick = {} -- par joueur (event.player_index) : le seuil a
                                    -- (CRAFT_EVENT_MIN_INTERVAL) ne doit s'appliquer qu'a un
                                    -- meme joueur qui craft en rafale, pas empecher le craft
                                    -- d'un autre joueur juste parce que le premier vient d'agir
-local POWER_SCAN_RADIUS = 60 -- tuiles autour de chaque joueur connecte (pas toute la base, pour les perfs).
+local POWER_SCAN_RADIUS = 40 -- tuiles autour de chaque joueur connecte (pas toute la base, pour les perfs).
                              -- 150 a l'origine : sur une base dense, le scan ramenait des milliers
-                             -- d'entites d'un coup et gelait la frame (~100 ms mesures) -- 60 suffit
-                             -- pour "ce qui manque de courant autour de moi"
+                             -- d'entites d'un coup et gelait la frame (~100 ms mesures). Reduit une
+                             -- premiere fois a 60 avec un filtre de type, puis encore ici : sur une
+                             -- base avec beaucoup de beacons/assembleuses groupees, 60 tuiles peut
+                             -- encore ramener beaucoup d'entites -- combine a POWER_SCAN_INTERVAL_TICKS
+                             -- (scan moins frequent) plutot que de choisir entre les deux.
 local TRAIN_PROXIMITY_RADIUS = 15 -- bien plus serre que POWER_SCAN_RADIUS : "danger immediat", pas "quelque part dans la base"
 
 -- Compteurs par mod pour l'explorateur d'evenements (storage.chroma_mod_counts
@@ -100,11 +117,15 @@ local function safe_gui_handler(handler)
   end
 end
 
+local function _get_alerts(player)
+  return player.get_alerts{}
+end
+
 -- Compte, pour UN joueur donne, le nombre d'alertes actives par type
 -- (defines.alert_type).
 local function count_player_alerts(player)
   local counts = {}
-  local ok, alerts = pcall(function() return player.get_alerts{} end)
+  local ok, alerts = pcall(_get_alerts, player)
   if ok and alerts then
     for _, by_type in pairs(alerts) do
       for alert_type_id, list in pairs(by_type) do
@@ -171,6 +192,17 @@ end
 -- manque si on ne cherche que "locomotive").
 local ROLLING_STOCK_TYPES = {"locomotive", "cargo-wagon", "fluid-wagon", "artillery-wagon"}
 
+-- Fermeture nommee plutot qu'anonyme recreee a chaque appel : ce scan tourne
+-- 10x/seconde et par joueur connecte (TRAIN_SCAN_INTERVAL_TICKS).
+local function _find_rolling_stock(player)
+  return player.surface.find_entities_filtered{
+    position = player.character.position,
+    radius = TRAIN_PROXIMITY_RADIUS,
+    type = ROLLING_STOCK_TYPES,
+    force = "player",
+  }
+end
+
 -- Alerte de proximite : un train EN MOUVEMENT dans un rayon serre autour du
 -- joueur (voir TRAIN_PROXIMITY_RADIUS) -- pense pour prevenir avant de se
 -- faire percuter en traversant une voie, pas pour signaler "il y a un train
@@ -183,14 +215,7 @@ local function count_nearby_moving_train(player)
   if player.vehicle and player.vehicle.train then return counts end
 
   local seen_trains = {}
-  local ok, rolling_stock = pcall(function()
-    return player.surface.find_entities_filtered{
-      position = player.character.position,
-      radius = TRAIN_PROXIMITY_RADIUS,
-      type = ROLLING_STOCK_TYPES,
-      force = "player",
-    }
-  end)
+  local ok, rolling_stock = pcall(_find_rolling_stock, player)
   if not ok then return counts end
 
   for _, car in pairs(rolling_stock) do
@@ -219,6 +244,27 @@ script.on_nth_tick(TRAIN_SCAN_INTERVAL_TICKS, function()
   end
 end)
 
+-- Scan electrique : le plus couteux du mod (voir POWER_SCAN_RADIUS), donc a
+-- part et moins frequent que le reste du statut (POWER_SCAN_INTERVAL_TICKS,
+-- ~3s au lieu de 1s). Resultat mis en cache par joueur ; write_status()
+-- relit simplement ce cache au lieu de rescanner a chaque appel.
+script.on_nth_tick(POWER_SCAN_INTERVAL_TICKS, function()
+  storage.chroma_power_cache = storage.chroma_power_cache or {}
+  for _, player in pairs(game.connected_players) do
+    local ok, counts = pcall(count_player_power_issues, player)
+    if ok then
+      storage.chroma_power_cache[player.index] = counts
+    end
+  end
+end)
+
+script.on_nth_tick(MAPPING_SELF_REPAIR_INTERVAL_TICKS, function()
+  local ok, err = pcall(gui.ensure_mapping_files)
+  if not ok then
+    log("[chroma-bridge] erreur dans ensure_mapping_files, ignoree : " .. tostring(err))
+  end
+end)
+
 -- Etat partage (propriete de la FORCE, identique pour toute l'equipe --
 -- evolution biters, recherche en cours) : un seul fichier, ecrit sans
 -- player_index cible, donc visible chez tout le monde (comme avant).
@@ -240,13 +286,16 @@ local function write_status()
   end
   util.safe_write_json("chroma_status.json", shared_status, false)
 
+  local power_cache = storage.chroma_power_cache or {}
   for _, player in pairs(game.connected_players) do
     local alerts_by_type = count_player_alerts(player)
-    local power_issues = count_player_power_issues(player)
+    -- Ni train_nearby ni le statut electrique ne sont recalcules ici : le
+    -- scan train (TRAIN_SCAN_INTERVAL_TICKS, plus rapide) ecrit deja son
+    -- propre fichier, et le scan electrique (POWER_SCAN_INTERVAL_TICKS,
+    -- plus lent -- le plus couteux du mod) alimente power_cache a part.
+    local power_issues = power_cache[player.index] or {no_power = 0, low_power = 0}
     alerts_by_type.no_power = power_issues.no_power
     alerts_by_type.low_power = power_issues.low_power
-    -- train_nearby n'est PAS recalcule ici : le scan dedie (TRAIN_SCAN_INTERVAL_TICKS,
-    -- plus haut) l'ecrit deja a un rythme plus rapide dans son propre fichier.
 
     local player_health = nil
     local local_pollution = 0
@@ -269,8 +318,9 @@ local function write_status()
   -- parties commencees avant leur ajout : on_configuration_changed ne se
   -- redeclenche pas juste parce qu'on a modifie les fichiers du mod sans
   -- changer sa version, donc la migration doit pouvoir tourner ici aussi.
+  -- Pas cher (aucun I/O si rien ne manque), contrairement a
+  -- gui.ensure_mapping_files() ci-dessous -- reste donc au rythme normal.
   gui.init_defaults()
-  gui.ensure_mapping_files()
 end
 
 -- Les deux fichiers d'evenements (chroma_events.jsonl partage, et le canal
