@@ -957,7 +957,7 @@ function gui.toggle(player)
   local window_max_w = math.floor(avail_w * 0.9)
   local window_max_h = math.floor(avail_h * 0.85)
 
-  local window = screen.add{type = "frame", name = "chroma_bridge_window", direction = "vertical", caption = "Chroma Bridge"}
+  local window = screen.add{type = "frame", name = "chroma_bridge_window", direction = "vertical"}
   window.auto_center = true
   -- Un frame ajoute a gui.screen ne s'etire pas tout seul, mais le
   -- tabbed-pane qu'il contient (voir plus bas) l'est PAR DEFAUT -- sans ces
@@ -969,6 +969,24 @@ function gui.toggle(player)
   window.style.horizontally_stretchable = false
   window.style.maximal_width = window_max_w
   window.style.maximal_height = window_max_h
+
+  -- Barre de titre construite a la main (au lieu du parametre `caption` du
+  -- frame) pour pouvoir y accrocher un bouton "fermer" -- convention
+  -- standard des fenetres Factorio (vanilla et mods). Contrairement au
+  -- bouton "Fermer" precedent, place tout en bas de la fenetre : celui-la
+  -- disparaissait derriere le bord de l'ecran des que le contenu d'un onglet
+  -- (ex: la liste de l'Explorateur) rendait la fenetre plus haute que
+  -- l'ecran -- et donnait l'impression de n'exister que sur l'onglet Config,
+  -- le seul assez court pour laisser le bouton visible. Ici, la barre de
+  -- titre est au-dessus du tabbed-pane : toujours visible, sur tous les
+  -- onglets, quelle que soit leur hauteur.
+  local titlebar = window.add{type = "flow", direction = "horizontal"}
+  titlebar.drag_target = window
+  titlebar.add{type = "label", caption = "Chroma Bridge", style = "frame_title", ignored_by_interaction = true}
+  local drag_handle = titlebar.add{type = "empty-widget", style = "draggable_space_header", ignored_by_interaction = true}
+  drag_handle.style.horizontally_stretchable = true
+  drag_handle.style.height = 24
+  titlebar.add{type = "sprite-button", name = "chroma_close_button", sprite = "utility/close", style = "frame_action_button", tooltip = "Fermer"}
 
   local top = window.add{type = "flow", direction = "horizontal"}
   top.add{type = "label", caption = "Layout clavier :"}
@@ -1004,10 +1022,6 @@ function gui.toggle(player)
   pane.add_tab(tab_export, content_export)
 
   pane.selected_tab_index = TAB_CONFIG
-
-  window.add{type = "line"}
-  local bottom = window.add{type = "flow", direction = "horizontal"}
-  bottom.add{type = "button", name = "chroma_close_button", caption = "Fermer"}
 
   player.opened = window
 
