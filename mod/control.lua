@@ -22,38 +22,22 @@ local util = require("util")
 local gui = require("gui")
 local event_explorer = require("event_explorer")
 
-local POLL_INTERVAL_TICKS = 60 -- 1x par seconde (60 ticks = 1s a vitesse normale)
+local POLL_INTERVAL_TICKS = 60 -- 1x/s
 local TRAIN_SCAN_INTERVAL_TICKS = 6 -- ~0.1s : alerte de securite, doit reagir plus vite que le statut general
-local POWER_SCAN_INTERVAL_TICKS = 180 -- ~3s : contrairement au train (danger immediat), une coupure de
-                                       -- courant n'a pas besoin d'etre detectee a la seconde pres --
-                                       -- ce scan reste le plus couteux du mod meme apres filtre de
-                                       -- type/rayon (voir POWER_SCAN_RADIUS), l'espacer du reste du
-                                       -- statut (POLL_INTERVAL_TICKS) divise d'autant sa contribution
-                                       -- totale au temps de frame. Resultat mis en cache
-                                       -- (storage.chroma_power_cache) et relu par write_status.
-local CRAFT_EVENT_MIN_INTERVAL = 30 -- ticks (~0.5s) entre deux "item_crafted" pour eviter le spam
-local BASE_ATTACK_EVENT_MIN_INTERVAL = 180 -- ticks (~3s, aligne sur le "hold" par defaut de l'effet
-                                            -- base_under_attack cote mapping.json) entre deux ecritures.
-                                            -- on_entity_damaged se declenche pour CHAQUE degat inflige
-                                            -- dans toute la partie (pas seulement au joueur) -- sous une
-                                            -- grosse attaque de biters, ca peut etre des centaines de
-                                            -- fois par seconde, et sans throttle chaque occurrence qui
-                                            -- passe le filtre (joueur + biters) declenchait une ecriture
-                                            -- disque. L'effet visuel reste affiche pendant le hold de
-                                            -- toute facon, pas la peine de reecrire plus souvent que ca
-                                            -- ne peut visuellement changer quelque chose.
+local POWER_SCAN_INTERVAL_TICKS = 180 -- ~3s : le scan le plus couteux du mod (voir POWER_SCAN_RADIUS),
+                                       -- espace du reste du statut. Resultat en cache
+                                       -- (storage.chroma_power_cache), relu par write_status.
+local CRAFT_EVENT_MIN_INTERVAL = 30 -- ticks (~0.5s) entre deux "item_crafted", anti-spam
+local BASE_ATTACK_EVENT_MIN_INTERVAL = 180 -- ticks (~3s, aligne sur le hold par defaut de l'effet
+                                            -- base_under_attack) : on_entity_damaged se declenche pour
+                                            -- CHAQUE degat inflige dans toute la partie, sans throttle
+                                            -- une attaque de biters ecrirait des centaines de fois/s.
 local MAPPING_SELF_REPAIR_INTERVAL_TICKS = 60 * 15 -- ~15s : gui.ensure_mapping_files() re-ecrit
-                                                    -- chroma_mapping.json de chaque joueur, uniquement
-                                                    -- pour se reparer si le fichier a disparu -- pas
-                                                    -- besoin que ce filet de securite tourne aussi
-                                                    -- souvent que le reste du statut, ca ne faisait que
-                                                    -- (de)serialiser en JSON et reecrire sur disque pour
-                                                    -- rien la quasi-totalite du temps.
-local EVENTS_RESET_INTERVAL_TICKS = 60 * 60 * 10 -- ~10 min a vitesse normale : purge periodique de
-                                                  -- chroma_events.jsonl (seul fichier en ecriture
-                                                  -- "append") pour qu'une session tres longue (8h+,
-                                                  -- AFK/craft en masse) ne le fasse pas grossir sans
-                                                  -- fin entre deux purges de debut de session
+                                                    -- chroma_mapping.json, filet de securite si le
+                                                    -- fichier disparait -- pas besoin d'un rythme rapide.
+local EVENTS_RESET_INTERVAL_TICKS = 60 * 60 * 10 -- ~10 min : purge periodique de chroma_events.jsonl
+                                                  -- (seul fichier en ecriture "append") pour qu'une
+                                                  -- session tres longue ne le fasse pas grossir sans fin.
 
 -- Table inversee id -> nom, construite une seule fois, pour retrouver le nom
 -- lisible (ex: "no_storage") a partir de l'id renvoye par player.get_alerts().
@@ -62,24 +46,14 @@ for name, id in pairs(defines.alert_type) do
   ALERT_TYPE_NAMES[id] = name
 end
 
-local last_craft_event_tick = {} -- par joueur (event.player_index) : le seuil anti-spam
-                                   -- (CRAFT_EVENT_MIN_INTERVAL) ne doit s'appliquer qu'a un
-                                   -- meme joueur qui craft en rafale, pas empecher le craft
-                                   -- d'un autre joueur juste parce que le premier vient d'agir
-local last_base_attack_event_tick = 0 -- global (pas par joueur) : base_under_attack est un evenement
-                                       -- d'equipe partage, un seul throttle suffit
-local last_train_nearby = {} -- par joueur (player.index) : evite de reecrire chroma_train_proximity.json
-                              -- si la valeur n'a pas change -- ce scan tourne 10x/seconde, et
-                              -- train_nearby vaut 0 en continu la quasi-totalite du temps (pas de train
-                              -- a proximite) -- pas la peine d'ecrire un fichier identique 10x/s pour rien.
-local POWER_SCAN_RADIUS = 40 -- tuiles autour de chaque joueur connecte (pas toute la base, pour les perfs).
-                             -- 150 a l'origine : sur une base dense, le scan ramenait des milliers
-                             -- d'entites d'un coup et gelait la frame (~100 ms mesures). Reduit une
-                             -- premiere fois a 60 avec un filtre de type, puis encore ici : sur une
-                             -- base avec beaucoup de beacons/assembleuses groupees, 60 tuiles peut
-                             -- encore ramener beaucoup d'entites -- combine a POWER_SCAN_INTERVAL_TICKS
-                             -- (scan moins frequent) plutot que de choisir entre les deux.
-local TRAIN_PROXIMITY_RADIUS = 15 -- bien plus serre que POWER_SCAN_RADIUS : "danger immediat", pas "quelque part dans la base"
+local last_craft_event_tick = {} -- par joueur : le throttle ne doit pas bloquer le craft d'un
+                                  -- autre joueur juste parce que le premier vient d'agir
+local last_base_attack_event_tick = 0 -- global : base_under_attack est un evenement d'equipe partage
+local last_train_nearby = {} -- par joueur : evite de reecrire le fichier quand la valeur n'a pas
+                              -- change (ce scan tourne 10x/s, train_nearby vaut 0 la plupart du temps)
+local POWER_SCAN_RADIUS = 40 -- tuiles autour du joueur (pas toute la base) -- le scan le plus couteux
+                             -- du mod sur une base dense, voir POWER_SCAN_INTERVAL_TICKS
+local TRAIN_PROXIMITY_RADIUS = 15 -- bien plus serre que POWER_SCAN_RADIUS : danger immediat, pas "dans la base"
 
 -- Compteurs par mod pour l'explorateur d'evenements (storage.chroma_mod_counts
 -- [event_ou_alerte][nom_du_mod] = nombre de fois vu), partages pour toute

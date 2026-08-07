@@ -29,18 +29,9 @@ if sys.platform.startswith("linux"):
 else:
     from chroma_client import ChromaClient
 from keyboard_grid import single_key_grid
-from keyboard_layout import LAYOUTS, OVERRIDES_PATH, key_to_rowcol
+from keyboard_layout import LAYOUTS, OVERRIDES_PATH, key_to_rowcol, load_overrides
 
 TEST_COLOR = (255, 255, 255)
-
-
-def load_overrides() -> dict:
-    if not OVERRIDES_PATH.exists():
-        return {}
-    try:
-        return json.loads(OVERRIDES_PATH.read_text(encoding="utf-8"))
-    except (json.JSONDecodeError, OSError):
-        return {}
 
 
 def save_overrides(overrides: dict):

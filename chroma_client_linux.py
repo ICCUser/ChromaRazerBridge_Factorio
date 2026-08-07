@@ -137,11 +137,11 @@ class ChromaClient:
             print(f"[chroma_client_linux] keyboard <- custom_keyboard : erreur : {exc}")
 
     def static_all(self, rgb):
-        for device in ("keyboard", "mouse", "chromalink"):
+        for device in ("keyboard", "mouse", "mousepad", "headset", "chromalink"):
             self.static(device, rgb)
 
     def breathing_all(self, rgb1, rgb2=None):
-        for device in ("keyboard", "mouse", "chromalink"):
+        for device in ("keyboard", "mouse", "mousepad", "headset", "chromalink"):
             self.breathing(device, rgb1, rgb2)
 
     def close(self):

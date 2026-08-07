@@ -142,11 +142,11 @@ class ChromaClient:
     # --- Effets haut niveau (tous les peripheriques a la fois) ---
 
     def static_all(self, rgb):
-        for device in ("keyboard", "mouse", "chromalink"):
+        for device in ("keyboard", "mouse", "mousepad", "headset", "chromalink"):
             self.static(device, rgb)
 
     def breathing_all(self, rgb1, rgb2=None):
-        for device in ("keyboard", "mouse", "chromalink"):
+        for device in ("keyboard", "mouse", "mousepad", "headset", "chromalink"):
             self.breathing(device, rgb1, rgb2)
 
     def blink_all(self, rgb, times=8, interval=0.2):

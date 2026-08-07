@@ -124,20 +124,34 @@ ZONE_DEFINITIONS = {
 ZONE_DEFINITIONS["movement"] = ZONE_DEFINITIONS["wasd"]
 
 
-def _load_overrides() -> dict:
-    if not OVERRIDES_PATH.exists():
-        return {}
+# Cache par mtime (meme mecanisme que MappingStore) : resolve_keys() est
+# appele pour chaque touche de chaque barre/alerte active a chaque poll
+# (~5x/s), sans ca load_overrides() relirait ce fichier depuis le disque a
+# chaque touche.
+_overrides_cache = {"mtime": None, "data": {}}
+
+
+def load_overrides() -> dict:
     try:
-        return json.loads(OVERRIDES_PATH.read_text(encoding="utf-8"))
-    except (json.JSONDecodeError, OSError):
+        mtime = OVERRIDES_PATH.stat().st_mtime
+    except OSError:
+        _overrides_cache["mtime"] = None
+        _overrides_cache["data"] = {}
         return {}
+    if mtime != _overrides_cache["mtime"]:
+        try:
+            _overrides_cache["data"] = json.loads(OVERRIDES_PATH.read_text(encoding="utf-8"))
+        except (json.JSONDecodeError, OSError):
+            _overrides_cache["data"] = {}
+        _overrides_cache["mtime"] = mtime
+    return _overrides_cache["data"]
 
 
 def key_to_rowcol(label: str, layout: str = "azerty_fr"):
     """Resout un nom de touche (ex: 'F5', 'A', 'SPACE') en (ligne, colonne).
     Les corrections de grid_overrides.json (ecrites par calibrate.py) sont
     prioritaires sur la grille de reference."""
-    overrides = _load_overrides()
+    overrides = load_overrides()
     key = f"{layout}:{label.upper()}"
     if key in overrides:
         return tuple(overrides[key])

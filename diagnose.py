@@ -45,7 +45,8 @@ print("3) Clavier en VERT fixe pendant 3s...")
 client.static("keyboard", (0, 255, 0))
 time.sleep(3)
 
-print("4) Cycle de teintes (arc-en-ciel maison) sur tout le setup pendant 6s...")
+print("4) Cycle de teintes (arc-en-ciel maison) sur les 5 peripheriques (clavier, souris, "
+      "tapis, casque, chromalink) pendant 6s...")
 start = time.time()
 while time.time() - start < 6:
     client.static_all(rainbow_color(time.time()))
@@ -65,4 +66,4 @@ print("  1b) Tapis violet (CHROMA_CUSTOM, device 'mousepad') ?")
 print("  1c) Tapis jaune (CHROMA_STATIC, device 'chromalink') ?")
 print("  2) Souris bleue ?")
 print("  3) Clavier vert ?")
-print("  4) Arc-en-ciel visible (sur les 3 appareils, y compris le tapis) ?")
+print("  4) Arc-en-ciel visible (clavier, souris, tapis, casque, chromalink) ?")

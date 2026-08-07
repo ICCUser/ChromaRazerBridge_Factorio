@@ -2,17 +2,9 @@
 -- quel appareil / quelle touche / quelle couleur / quel clignotement est
 -- associe a chaque evenement ponctuel ou alerte continue du bridge.
 --
--- Une seule fenetre, organisee en onglets (tabbed-pane) plutot qu'en une
--- demi-douzaine de fenetres flottantes independantes -- c'etait le plus
--- gros reproche remonte sur l'interface d'origine. Voir TAB_* plus bas pour
--- la liste des onglets et tab_content() pour la subtilite d'acces a leur
--- contenu (le contenu d'un onglet n'est PAS accessible par nom depuis le
--- tabbed-pane comme un enfant normal -- specificite de ce widget Factorio,
--- il faut passer par tabbed_pane.tabs[index].content).
---
--- Le resultat est ecrit dans script-output/chroma_mapping.json, relu et
--- fusionne automatiquement par le bridge Python (mapping_loader.py) sans
--- avoir besoin de relancer main.py.
+-- Une seule fenetre a onglets (tabbed-pane), voir TAB_* et tab_content().
+-- Ecrit dans script-output/chroma_mapping.json, relu et fusionne
+-- automatiquement par le bridge Python (mapping_loader.py).
 
 local util = require("util")
 local event_explorer = require("event_explorer")
@@ -63,11 +55,9 @@ local function inverse_layout(layout_name)
   return by_pos
 end
 
--- Contenu d'un onglet du tabbed-pane principal, par index (voir TAB_* plus
--- haut). Le contenu ajoute via tabbed_pane.add_tab(tab, content) n'est PAS
--- accessible par nom depuis le tabbed-pane comme un enfant normal -- il
--- faut passer par la propriete tabs (array de {tab=.., content=..}).
--- Renvoie nil si la fenetre ou le tabbed-pane n'existe pas (fenetre fermee).
+-- Contenu d'un onglet par index (TAB_*). Pas accessible par nom depuis le
+-- tabbed-pane comme un enfant normal -- passe par tabs[index].content.
+-- Renvoie nil si la fenetre est fermee.
 local function tab_content(player, index)
   local window = player.gui.screen.chroma_bridge_window
   if not window then return nil end
@@ -77,10 +67,9 @@ local function tab_content(player, index)
   return entry and entry.content
 end
 
--- L'onglet Config place liste + detail cote a cote dans un flow horizontal
--- (chroma_config_row, voir build_config_tab), lui-meme seul enfant du
--- scroll-pane de l'onglet. Un niveau d'indirection de plus que tab_content,
--- donc son propre helper.
+-- L'onglet Config place liste + detail dans un flow horizontal imbrique
+-- (chroma_config_row, voir build_config_tab) -- un niveau de plus que
+-- tab_content, donc son propre helper.
 local function config_row(player)
   local content = tab_content(player, TAB_CONFIG)
   return content and content.chroma_config_row
@@ -192,14 +181,11 @@ local function write_mapping_file(player)
   end
 end
 
--- Reecrit chroma_mapping.json de maniere inconditionnelle, pour chaque
--- joueur connecte. Un mod Lua ne peut pas verifier si un fichier existe deja
--- sur le disque (sandbox de Factorio), donc on ne peut pas detecter qu'il a
--- disparu -- on se contente de le reecrire regulierement (control.lua
--- l'appelle depuis write_status, ~1x/seconde) pour s'auto-reparer si jamais
--- le fichier est supprime/perdu (ex: script-output vide entre deux
--- sessions) sans que storage.player_mappings, lui, ne soit affecte (il est
--- sauvegarde avec la partie).
+-- Reecrit chroma_mapping.json inconditionnellement pour chaque joueur
+-- connecte (control.lua l'appelle ~1x/s) : un mod ne peut pas verifier si
+-- un fichier existe sur le disque, donc c'est le seul moyen de s'auto-
+-- reparer si le fichier disparait (storage.player_mappings, lui, survit
+-- puisqu'il est sauvegarde avec la partie).
 function gui.ensure_mapping_files()
   if not storage.player_mappings then return end
   for _, player in pairs(game.connected_players) do
@@ -334,14 +320,8 @@ local function section_label(parent, text)
   parent.add{type = "label", caption = "[font=default-bold]" .. text .. "[/font]"}
 end
 
--- Un label Factorio ne retourne JAMAIS a la ligne tout seul (confirme dans
--- la doc LuaGuiElement, 2.0.77 : rendu sur une seule ligne sauf contrainte
--- de largeur explicite) -- les textes d'explication longs (Ambiance,
--- Alertes personnalisees, Explorateur, Export/Import) demandaient donc
--- toute leur largeur naturelle d'un coup, forcant le reste de l'onglet a
--- s'elargir en consequence -- la scrollbar horizontale parasite constatee
--- en jeu. single_line=false + maximal_width force le retour a la ligne
--- dans une largeur raisonnable, commune a tous les onglets.
+-- Un label Factorio ne retourne jamais a la ligne sans contrainte de
+-- largeur explicite -- sinon il force tout l'onglet a s'elargir.
 local DESCRIPTION_WRAP_WIDTH = 820
 
 local function description_label(parent, text)
@@ -351,15 +331,10 @@ local function description_label(parent, text)
   return label
 end
 
--- gui.on_click / gui.on_value_changed dispatchaient chacun 7 blocs quasi
--- identiques (couleur d'un event/alerte, barre recherche x2, barre vie x2,
--- ambiance x2) : un clic sur une pastille de preset, ou un glissement de
--- slider R/G/B, met a jour un champ couleur d'un draft puis reconstruit
--- l'onglet concerne. Les deux helpers ci-dessous portent cette logique une
--- seule fois -- seuls le prefixe de nom d'element et le draft/champ/onglet
--- cible changent d'un appelant a l'autre. Renvoient false sans rien faire
--- si le nom ne correspond pas ou si le draft est absent (fenetre fermee
--- entre-temps), pour que l'appelant enchaine sur le prochain candidat.
+-- Factorise le clic sur une pastille de preset / le glissement d'un slider
+-- R/G/B, communs a 7 endroits (config, barres x2, ambiance x2) -- seuls le
+-- prefixe de nom d'element et le draft/champ/onglet cible changent.
+-- Renvoient false si le nom ne correspond pas ou si le draft est absent.
 local function try_color_preset(name, prefix, draft, field, rebuild, player)
   if not draft then return false end
   local index = name:match("^" .. prefix .. "_preset__(%d+)$")
@@ -529,20 +504,13 @@ local function build_config_tab(player)
   local content = tab_content(player, TAB_CONFIG)
   if not content then return end
   content.clear()
-  -- content est un scroll-pane (voir new_tab_content dans gui.toggle) :
-  -- pas de layout horizontal possible dessus (verifie dans la doc
-  -- LuaGuiElement.add, 2.0.77 : scroll-pane n'a pas de parametre
-  -- "direction"), donc liste + detail cote a cote passent par un flow
-  -- horizontal explicite, seul enfant direct du scroll-pane.
+  -- content est un scroll-pane (pas de parametre "direction") : liste +
+  -- detail cote a cote passent par un flow horizontal imbrique.
   local row = content.add{type = "flow", name = "chroma_config_row", direction = "horizontal"}
   row.style.horizontal_spacing = 12
 
   local list_scroll = row.add{type = "scroll-pane", name = "chroma_list_scroll", direction = "vertical"}
-  -- 280 (jusqu'a v1.8.20) etait trop etroit pour le plus long libelle
-  -- ("[Alerte] Sous-alimentation electrique (autour de toi)") -- constate
-  -- en jeu, ca declenchait une scrollbar horizontale parasite sur la
-  -- liste. 400 : marge confortable au-dessus de ce qu'il faut reellement.
-  list_scroll.style.minimal_width = 400
+  list_scroll.style.minimal_width = 400 -- assez pour le plus long libelle sans scrollbar horizontale
   list_scroll.style.maximal_height = 480
   build_list(list_scroll, player)
 
@@ -896,12 +864,11 @@ local function refresh_explorer_tab(player)
 end
 
 -- --- Onglet "Alertes personnalisees" (haut-parleurs programmables) ---
--- Ajoute/supprime des "watches" : {id, label, match_text}. Une fois
--- ajoutee, chaque watch apparait dans l'onglet Evenements & alertes (cle
--- "custom_<id>") pour choisir couleur/device/priorite avec l'editeur
--- generique existant -- aucun code Python necessaire, count_custom_alert_
--- watches (control.lua) alimente alerts_by_type comme n'importe quelle
--- autre alerte.
+-- Ajoute/supprime des "watches" : {id, label, match_text}. Chaque watch
+-- apparait ensuite dans Evenements & alertes (cle "custom_<id>") pour
+-- choisir couleur/device/priorite avec l'editeur generique existant --
+-- count_custom_alert_watches (control.lua) alimente alerts_by_type comme
+-- n'importe quelle autre alerte.
 
 local function build_watches_tab(player)
   local content = tab_content(player, TAB_WATCHES)
@@ -1005,20 +972,14 @@ function gui.toggle(player)
 
   local window = screen.add{type = "frame", name = "chroma_bridge_window", direction = "vertical"}
   window.auto_center = true
-  -- stretchable=false : la fenetre ne s'etire pas au-dela de ce que ses
-  -- enfants demandent. maximal_height : filet de securite au cas ou (le
-  -- pane porte deja son propre plafond plus bas, la source habituelle du
-  -- probleme).
   window.style.horizontally_stretchable = false
   window.style.vertically_stretchable = false
-  window.style.maximal_height = window_max_h
+  window.style.maximal_height = window_max_h -- filet de securite, le pane porte deja son propre plafond
 
-  -- Barre de titre construite a la main (au lieu du parametre `caption` du
-  -- frame) pour pouvoir y accrocher un bouton "fermer" -- convention
-  -- standard des fenetres Factorio (vanilla et mods). Au-dessus du
-  -- tabbed-pane : toujours visible, sur tous les onglets, quelle que soit
-  -- leur hauteur (un bouton place en bas du contenu, lui, dependrait de la
-  -- hauteur de l'onglet courant).
+  -- Barre de titre construite a la main (pas le parametre `caption` du
+  -- frame) pour accrocher un bouton "fermer" -- convention standard des
+  -- fenetres Factorio. Au-dessus du pane : toujours visible sur tous les
+  -- onglets.
   local titlebar = window.add{type = "flow", direction = "horizontal"}
   titlebar.drag_target = window
   titlebar.add{type = "label", caption = "Chroma Bridge", style = "frame_title", ignored_by_interaction = true}
@@ -1026,9 +987,6 @@ function gui.toggle(player)
   drag_handle.style.horizontally_stretchable = true
   drag_handle.style.height = 24
   drag_handle.style.right_margin = 4
-  -- "utility/close_white" (essaye en v1.8.11) n'existe pas sur Factorio 2.0
-  -- -- confirme par factorio-current.log ("Unknown sprite"). "utility/close"
-  -- est le sprite valide sur cette version.
   titlebar.add{
     type = "sprite-button", name = "chroma_close_button", style = "frame_action_button", tooltip = "Fermer",
     sprite = "utility/close",
@@ -1043,44 +1001,24 @@ function gui.toggle(player)
   pane.style.horizontally_stretchable = false
   pane.style.vertically_stretchable = false
 
-  -- Plafond (jamais de taille exacte, voir doc LuaStyle : minimal/maximal
-  -- laissent le contenu determiner sa propre taille naturelle dans ces
-  -- bornes) sur le pane pour les deux axes -- confirme desormais SANS lien
-  -- avec le bug "fenetre reduite au bandeau de titre" (c'etait le sprite du
-  -- bouton fermer, voir plus haut) : sans ce plafond de hauteur, le pane se
-  -- remplit jusqu'a la hauteur offerte par la fenetre (window_max_h, quasi
-  -- tout l'ecran) au lieu de s'en tenir a la hauteur naturelle de son
-  -- contenu, malgre vertically_stretchable=false.
+  -- Plafond (jamais de taille exacte -- minimal/maximal laissent le
+  -- contenu determiner sa propre taille naturelle dans ces bornes) sur le
+  -- pane, calcule en proportion de l'ecran reel du joueur.
   local PANE_MAX_WIDTH = math.floor(math.max(780, math.min(window_max_w, avail_w * 0.45)))
   local PANE_MAX_HEIGHT = math.floor(math.max(520, math.min(window_max_h - 80, avail_h * 0.55)))
   pane.style.maximal_width = PANE_MAX_WIDTH
   pane.style.maximal_height = PANE_MAX_HEIGHT
 
-  -- Plancher commun applique au contenu de chaque onglet (pas au pane) pour
-  -- qu'aucun onglet peu charge (constate en jeu : Alertes personnalisees
-  -- tant qu'aucune alerte n'est ajoutee) ne rende une boite visiblement
-  -- plus petite que les autres (Recherche & Vie et Ambiance, par exemple,
-  -- ont largement plus de contenu et depassent deja ce plancher sans qu'il
-  -- les affecte). minimal_* seul (jamais width/height) : ne peut jamais
-  -- ecraser un onglet dont le contenu a besoin de plus de place, seulement
-  -- l'empecher d'etre plus PETIT que ce plancher. Volontairement modeste
-  -- (300, pas 480) : un plancher trop genereux ne fait que deplacer le vide
-  -- au lieu de le reduire pour les onglets les plus legers.
+  -- Plancher commun sur le CONTENU de chaque onglet (pas le pane) pour
+  -- qu'un onglet peu charge ne rende pas une boite visiblement plus petite
+  -- que les autres -- minimal_* seul, jamais width/height : ne peut pas
+  -- ecraser un onglet qui a besoin de plus de place.
   local TAB_MIN_WIDTH = math.min(780, PANE_MAX_WIDTH)
   local TAB_MIN_HEIGHT = math.min(300, PANE_MAX_HEIGHT)
 
-  -- Contenu de chaque onglet = scroll-pane (pas un simple flow) : constate
-  -- en jeu (v1.8.19), certains onglets (Recherche & Vie, Ambiance,
-  -- Explorateur, Alertes personnalisees) ont un contenu naturellement plus
-  -- haut que PANE_MAX_HEIGHT -- avec un flow (qui ne scrolle pas), ce
-  -- surplus deborde hors de la boite au lieu d'y rester contenu. Un
-  -- scroll-pane, lui, ajoute une scrollbar au lieu de deborder. Comme
-  -- flow, il est stretchable par defaut (voir plus haut pourquoi c'est
-  -- desactive partout dans cette fenetre) -- mais horizontally_/vertically_
-  -- stretchable=false seul aurait pour effet pervers de retirer aussi le
-  -- plafond implicite qui declenche le scroll : ici on VEUT qu'il se
-  -- limite a PANE_MAX_HEIGHT (maximal_height) tout en restant capable de
-  -- se limiter a moins (pas de stretch), scrollant seulement le surplus.
+  -- Contenu de chaque onglet = scroll-pane (pas un flow, qui ne scrolle
+  -- pas) pour qu'un contenu plus haut que PANE_MAX_HEIGHT scrolle au lieu
+  -- de deborder de la boite.
   local function new_tab_content(caption)
     local tab = pane.add{type = "tab", caption = caption}
     local content = pane.add{type = "scroll-pane"}
