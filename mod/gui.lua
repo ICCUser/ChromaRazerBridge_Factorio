@@ -931,17 +931,44 @@ function gui.toggle(player)
     return
   end
 
-  -- Largeur commune a tous les onglets, fixee (pas juste minimale) pour que
-  -- la fenetre ne "saute" pas de taille en changeant d'onglet.
-  local TAB_WIDTH = 640
+  -- Avant (v1.8.5) : une largeur FIXE (640px, style.width) forcait sur
+  -- CHAQUE onglet, y compris la liste d'evenements/alertes de l'onglet
+  -- "Config" -- dont les libelles les plus longs ("[Alerte]
+  -- Sous-alimentation electrique (autour de toi)") ont besoin de plus de
+  -- 280px pour s'afficher sans coupure. Une largeur fixee trop etroite pour
+  -- son propre contenu forcait le scroll-pane de la liste a compresser sa
+  -- zone visible et a faire apparaitre une scrollbar horizontale interne --
+  -- exactement le "ca depasse" remonte en jeu, en plus de ne pas s'adapter
+  -- a la resolution reelle du joueur (que ce soit un ecran 1080p trop
+  -- petit pour 640px de large ou un 32" 4K/ultra-wide largement assez
+  -- grand pour bien plus).
+  --
+  -- Ici : chaque onglet garde sa largeur NATURELLE (determinee par son
+  -- propre contenu, pas une constante partagee), et seule la fenetre/le
+  -- tabbed-pane recoit un plafond -- calcule en PROPORTION de la resolution
+  -- d'affichage reelle du joueur (display_resolution/display_scale, en
+  -- pixels GUI, donc deja corrige du DPI/UI-scale) -- pour ne jamais
+  -- depasser l'ecran quelle que soit sa taille, sans pour autant brider
+  -- artificiellement les gros ecrans avec un plafond fixe en pixels.
+  local res = player.display_resolution
+  local scale = (player.display_scale and player.display_scale > 0) and player.display_scale or 1
+  local avail_w = (res and res.width and res.width > 0) and (res.width / scale) or 1920
+  local avail_h = (res and res.height and res.height > 0) and (res.height / scale) or 1080
+  local window_max_w = math.floor(avail_w * 0.9)
+  local window_max_h = math.floor(avail_h * 0.85)
 
   local window = screen.add{type = "frame", name = "chroma_bridge_window", direction = "vertical", caption = "Chroma Bridge"}
   window.auto_center = true
   -- Un frame ajoute a gui.screen ne s'etire pas tout seul, mais le
   -- tabbed-pane qu'il contient (voir plus bas) l'est PAR DEFAUT -- sans ces
-  -- deux lignes, la fenetre entiere s'etirait sur presque toute la largeur
-  -- de l'ecran au lieu de se limiter a la largeur de son contenu.
+  -- lignes, la fenetre entiere s'etirait sur presque toute la largeur de
+  -- l'ecran au lieu de se limiter a la largeur de son contenu (borne par
+  -- window_max_w/window_max_h ci-dessus uniquement si le contenu depasserait
+  -- l'ecran du joueur -- sinon la fenetre reste a sa taille naturelle, plus
+  -- petite).
   window.style.horizontally_stretchable = false
+  window.style.maximal_width = window_max_w
+  window.style.maximal_height = window_max_h
 
   local top = window.add{type = "flow", direction = "horizontal"}
   top.add{type = "label", caption = "Layout clavier :"}
@@ -950,36 +977,30 @@ function gui.toggle(player)
 
   local pane = window.add{type = "tabbed-pane", name = "chroma_tabbed_pane"}
   pane.style.horizontally_stretchable = false
-  pane.style.maximal_width = TAB_WIDTH + 20 -- marge pour le cadre interne du tabbed-pane
+  pane.style.maximal_width = window_max_w
 
   local tab_config = pane.add{type = "tab", caption = "Evenements & alertes"}
   local content_config = pane.add{type = "flow", direction = "horizontal"}
-  content_config.style.width = TAB_WIDTH
   pane.add_tab(tab_config, content_config)
 
   local tab_bars = pane.add{type = "tab", caption = "Recherche & Vie"}
   local content_bars = pane.add{type = "flow", direction = "vertical"}
-  content_bars.style.width = TAB_WIDTH
   pane.add_tab(tab_bars, content_bars)
 
   local tab_ambiance = pane.add{type = "tab", caption = "Ambiance"}
   local content_ambiance = pane.add{type = "flow", direction = "vertical"}
-  content_ambiance.style.width = TAB_WIDTH
   pane.add_tab(tab_ambiance, content_ambiance)
 
   local tab_watches = pane.add{type = "tab", caption = "Alertes personnalisees"}
   local content_watches = pane.add{type = "flow", direction = "vertical"}
-  content_watches.style.width = TAB_WIDTH
   pane.add_tab(tab_watches, content_watches)
 
   local tab_explorer = pane.add{type = "tab", caption = "Explorateur"}
   local content_explorer = pane.add{type = "flow", direction = "vertical"}
-  content_explorer.style.width = TAB_WIDTH
   pane.add_tab(tab_explorer, content_explorer)
 
   local tab_export = pane.add{type = "tab", caption = "Export / Import"}
   local content_export = pane.add{type = "flow", direction = "vertical"}
-  content_export.style.width = TAB_WIDTH
   pane.add_tab(tab_export, content_export)
 
   pane.selected_tab_index = TAB_CONFIG
