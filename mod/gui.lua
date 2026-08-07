@@ -481,6 +481,11 @@ local function build_config_tab(player)
 
   local detail = content.add{type = "flow", name = "chroma_detail_flow", direction = "vertical"}
   detail.style.minimal_width = 320
+  -- Remplit l'espace restant plutot que de laisser un vide a droite quand la
+  -- liste (a gauche) est plus etroite que le plancher commun TAB_MIN_WIDTH
+  -- (voir gui.toggle) -- l'espace gagne pour l'homogeneite entre onglets ne
+  -- doit pas se voir comme un trou, juste comme plus de place pour le detail.
+  detail.style.horizontally_stretchable = true
   detail.add{type = "label", caption = "Selectionne un evenement ou une alerte a gauche."}
 end
 
@@ -997,28 +1002,54 @@ function gui.toggle(player)
   pane.style.horizontally_stretchable = false
   pane.style.maximal_width = window_max_w
 
+  -- Chaque onglet gardait sa largeur/hauteur NATURELLE (v1.8.6) : correct
+  -- pour empecher l'ecrasement du contenu (le bug d'origine), mais du coup
+  -- un onglet peu charge (Ambiance, Recherche & Vie) rendait une fenetre
+  -- visiblement plus petite qu'un onglet dense (Config, Explorateur) --
+  -- "certains onglets sont etendus, d'autres petits". Un plancher commun
+  -- (minimal_width/minimal_height, PAS width/height qui forcerait une
+  -- taille fixe et recreerait le bug d'ecrasement) applique a tous les
+  -- onglets uniformise la boite visible : jamais plus petit que ce plancher,
+  -- toujours libre de grandir au-dela si son propre contenu en a besoin.
+  -- Plafonne a window_max_w/h (l'ecran reel du joueur, voir plus haut) pour
+  -- rester coherent avec la fenetre elle-meme sur un tout petit ecran.
+  local TAB_MIN_WIDTH = math.min(800, window_max_w)
+  local TAB_MIN_HEIGHT = math.min(480, window_max_h - 80)
+
   local tab_config = pane.add{type = "tab", caption = "Evenements & alertes"}
   local content_config = pane.add{type = "flow", direction = "horizontal"}
+  content_config.style.minimal_width = TAB_MIN_WIDTH
+  content_config.style.minimal_height = TAB_MIN_HEIGHT
   pane.add_tab(tab_config, content_config)
 
   local tab_bars = pane.add{type = "tab", caption = "Recherche & Vie"}
   local content_bars = pane.add{type = "flow", direction = "vertical"}
+  content_bars.style.minimal_width = TAB_MIN_WIDTH
+  content_bars.style.minimal_height = TAB_MIN_HEIGHT
   pane.add_tab(tab_bars, content_bars)
 
   local tab_ambiance = pane.add{type = "tab", caption = "Ambiance"}
   local content_ambiance = pane.add{type = "flow", direction = "vertical"}
+  content_ambiance.style.minimal_width = TAB_MIN_WIDTH
+  content_ambiance.style.minimal_height = TAB_MIN_HEIGHT
   pane.add_tab(tab_ambiance, content_ambiance)
 
   local tab_watches = pane.add{type = "tab", caption = "Alertes personnalisees"}
   local content_watches = pane.add{type = "flow", direction = "vertical"}
+  content_watches.style.minimal_width = TAB_MIN_WIDTH
+  content_watches.style.minimal_height = TAB_MIN_HEIGHT
   pane.add_tab(tab_watches, content_watches)
 
   local tab_explorer = pane.add{type = "tab", caption = "Explorateur"}
   local content_explorer = pane.add{type = "flow", direction = "vertical"}
+  content_explorer.style.minimal_width = TAB_MIN_WIDTH
+  content_explorer.style.minimal_height = TAB_MIN_HEIGHT
   pane.add_tab(tab_explorer, content_explorer)
 
   local tab_export = pane.add{type = "tab", caption = "Export / Import"}
   local content_export = pane.add{type = "flow", direction = "vertical"}
+  content_export.style.minimal_width = TAB_MIN_WIDTH
+  content_export.style.minimal_height = TAB_MIN_HEIGHT
   pane.add_tab(tab_export, content_export)
 
   pane.selected_tab_index = TAB_CONFIG
