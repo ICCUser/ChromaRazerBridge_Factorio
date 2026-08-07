@@ -77,16 +77,6 @@ local function tab_content(player, index)
   return entry and entry.content
 end
 
--- L'onglet Config (voir build_config_tab) place liste + detail cote a cote
--- dans un flow horizontal (chroma_config_row), lui-meme seul enfant du
--- scroll-pane de l'onglet -- necessaire car scroll-pane n'a pas de layout
--- horizontal possible (voir build_config_tab pour le detail). Un niveau
--- d'indirection de plus que tab_content, donc son propre helper.
-local function config_row(player)
-  local content = tab_content(player, TAB_CONFIG)
-  return content and content.chroma_config_row
-end
-
 local DEVICES = {
   {key = "all", label = "Tous les peripheriques"},
   {key = "keyboard", label = "Clavier"},
@@ -402,9 +392,9 @@ local function build_list(parent, player)
 end
 
 local function build_detail(player)
-  local row = config_row(player)
-  if not row then return end
-  local detail = row.chroma_detail_flow
+  local content = tab_content(player, TAB_CONFIG)
+  if not content then return end
+  local detail = content.chroma_detail_flow
   detail.clear()
 
   local draft = storage.chroma_draft[player.index]
@@ -513,33 +503,15 @@ local function build_config_tab(player)
   local content = tab_content(player, TAB_CONFIG)
   if not content then return end
   content.clear()
-  -- content est un scroll-pane (v1.8.10, filet de secu si le contenu
-  -- deborde de la boite fixe du pane). Un scroll-pane n'accepte PAS de
-  -- parametre "direction" a la creation (verifie dans la doc
-  -- LuaGuiElement.add) : son layout interne est toujours vertical -- donc
-  -- pour mettre liste et detail cote a cote, il faut un flow horizontal
-  -- explicite comme SEUL enfant direct du scroll-pane.
-  local row = content.add{type = "flow", name = "chroma_config_row", direction = "horizontal"}
-  row.style.horizontally_stretchable = true
+  content.style.horizontal_spacing = 12
 
-  local list_scroll = row.add{type = "scroll-pane", name = "chroma_list_scroll", direction = "vertical"}
+  local list_scroll = content.add{type = "scroll-pane", name = "chroma_list_scroll", direction = "vertical"}
   list_scroll.style.minimal_width = 280
   list_scroll.style.maximal_height = 480
-  -- Remplit la hauteur de la boite fixe du pane (voir PANE_HEIGHT dans
-  -- gui.toggle) au lieu de s'arreter net a son propre contenu et de laisser
-  -- un vide gris en dessous -- la scrollbar reste utile si la liste
-  -- elle-meme depasse les 480px (maximal_height ci-dessus), independamment
-  -- de ca.
-  list_scroll.style.vertically_stretchable = true
   build_list(list_scroll, player)
 
-  local detail = row.add{type = "flow", name = "chroma_detail_flow", direction = "vertical"}
+  local detail = content.add{type = "flow", name = "chroma_detail_flow", direction = "vertical"}
   detail.style.minimal_width = 320
-  detail.style.left_margin = 12
-  -- Remplit l'espace restant plutot que de laisser un vide a droite quand la
-  -- liste (a gauche) est plus etroite que la largeur fixe du pane (voir
-  -- PANE_WIDTH dans gui.toggle).
-  detail.style.horizontally_stretchable = true
   detail.add{type = "label", caption = "Selectionne un evenement ou une alerte a gauche."}
 end
 
@@ -1001,8 +973,8 @@ function gui.toggle(player)
   -- d'interface -- diviser l'un par l'autre donne l'espace disponible en
   -- pixels GUI, deja corrige du DPI/UI-scale ; confirme par les devs sur le
   -- forum officiel comme l'usage prevu de ces deux valeurs conjointement).
-  -- Sert de plafond a PANE_WIDTH/PANE_HEIGHT plus bas : jamais plus grand
-  -- que l'ecran du joueur, petit (1080p) ou grand (32" 4K/ultra-wide).
+  -- Sert de plafond a PANE_MAX_WIDTH/PANE_MAX_HEIGHT plus bas : jamais plus
+  -- grand que l'ecran du joueur, petit (1080p) ou grand (32" 4K/ultra-wide).
   local res = player.display_resolution
   local scale = (player.display_scale and player.display_scale > 0) and player.display_scale or 1
   local avail_w = (res and res.width and res.width > 0) and (res.width / scale) or 1920
@@ -1012,11 +984,10 @@ function gui.toggle(player)
 
   local window = screen.add{type = "frame", name = "chroma_bridge_window", direction = "vertical"}
   window.auto_center = true
-  -- La fenetre elle-meme n'a plus besoin de plafond explicite : sa taille
-  -- decoule desormais de celle, FIXE, du tabbed-pane qu'elle contient (voir
-  -- PANE_WIDTH/PANE_HEIGHT plus bas) plus la barre de titre et le
-  -- selecteur de layout au-dessus. stretchable=false pour ne pas grandir
-  -- au-dela de ce que ses enfants demandent.
+  -- La fenetre elle-meme n'a pas besoin de plafond explicite : sa taille
+  -- naturelle decoule de ses enfants (barre de titre, selecteur de layout,
+  -- puis le pane plafonne plus bas). stretchable=false pour ne pas grandir
+  -- au-dela de ce que ces enfants demandent.
   window.style.horizontally_stretchable = false
   window.style.vertically_stretchable = false
 
@@ -1050,42 +1021,47 @@ function gui.toggle(player)
   pane.style.horizontally_stretchable = false
   pane.style.vertically_stretchable = false
 
-  -- scroll-pane n'accepte PAS de parametre "direction" a la creation
-  -- (contrairement a flow -- verifie dans la doc LuaGuiElement.add : seuls
-  -- horizontal_scroll_policy/vertical_scroll_policy existent). Layout
-  -- interne toujours vertical. Pour l'onglet Config (liste + detail cote a
-  -- cote), voir build_config_tab : un flow horizontal est cree A
-  -- L'INTERIEUR du scroll-pane pour ce layout, le scroll-pane ne servant
-  -- que de filet de secu (scroll si jamais ca deborde de la boite fixe).
-  local function new_tab_content(caption)
+  -- Historique : v1.8.10-1.8.13 ont essaye de FIXER la taille du pane
+  -- (style.width/height, min=max) -- a chaque fois, rendu casse en jeu
+  -- (fenetre reduite a son bandeau de titre, rien en dessous), meme apres
+  -- avoir deplace l'affectation apres l'ajout des onglets et retente sans
+  -- fixer la hauteur. Un seul point commun aux trois echecs : fixer une
+  -- dimension EXACTE (pas juste un plafond) sur le pane lui-meme. On
+  -- revient donc au SEUL reglage confirme fonctionner en jeu (deja utilise
+  -- des la toute premiere version) : un plafond (maximal_width/height),
+  -- jamais une taille exacte, sur le pane. L'homogeneite de taille entre
+  -- onglets (demande separee) passe par un plancher (minimal_width/height)
+  -- sur le contenu de CHAQUE onglet plus bas, pas par une taille fixee sur
+  -- le pane.
+  local PANE_MAX_WIDTH = math.floor(math.max(780, math.min(window_max_w, avail_w * 0.45)))
+  local PANE_MAX_HEIGHT = math.floor(math.max(520, math.min(window_max_h - 80, avail_h * 0.55)))
+  pane.style.maximal_width = PANE_MAX_WIDTH
+  pane.style.maximal_height = PANE_MAX_HEIGHT
+
+  -- Plancher commun applique au contenu de chaque onglet (pas au pane) pour
+  -- qu'aucun onglet peu charge (Ambiance, Recherche & Vie) ne rende une
+  -- boite visiblement plus petite qu'un onglet dense (Config, Explorateur).
+  -- minimal_* seul (jamais width/height) : ne peut jamais ecraser un onglet
+  -- dont le contenu a besoin de plus de place, seulement l'empecher d'etre
+  -- plus PETIT que ce plancher.
+  local TAB_MIN_WIDTH = math.min(780, PANE_MAX_WIDTH)
+  local TAB_MIN_HEIGHT = math.min(480, PANE_MAX_HEIGHT)
+
+  local function new_tab_content(caption, direction)
     local tab = pane.add{type = "tab", caption = caption}
-    local content = pane.add{type = "scroll-pane"}
-    content.style.horizontally_stretchable = true
-    content.style.vertically_stretchable = true
+    local content = pane.add{type = "flow", direction = direction}
+    content.style.minimal_width = TAB_MIN_WIDTH
+    content.style.minimal_height = TAB_MIN_HEIGHT
     pane.add_tab(tab, content)
     return content
   end
 
-  local content_config = new_tab_content("Evenements & alertes")
-  local content_bars = new_tab_content("Recherche & Vie")
-  local content_ambiance = new_tab_content("Ambiance")
-  local content_watches = new_tab_content("Alertes personnalisees")
-  local content_explorer = new_tab_content("Explorateur")
-  local content_export = new_tab_content("Export / Import")
-
-  -- Taille fixee APRES ajout des onglets (et pas avant, comme en v1.8.10) :
-  -- fixer la taille d'un tabbed-pane encore vide semble perturber son calcul
-  -- de la place reservee a la barre d'onglets, au point de rendre tout le
-  -- contenu invisible une fois les onglets ajoutes (fenetre reduite a son
-  -- bandeau de titre en jeu). width fixe (min=max) comme avant ; height
-  -- seulement PLAFONNEE (maximal_height, pas width/height qui fixerait
-  -- aussi le minimum) -- width a deja fait ses preuves fixe, height jamais,
-  -- donc on prend moins de risque sur cet axe tant que ce n'est pas
-  -- reconfirme en jeu.
-  local PANE_WIDTH = math.floor(math.max(780, math.min(window_max_w, avail_w * 0.45)))
-  local PANE_HEIGHT = math.floor(math.max(520, math.min(window_max_h - 80, avail_h * 0.55)))
-  pane.style.width = PANE_WIDTH
-  pane.style.maximal_height = PANE_HEIGHT
+  local content_config = new_tab_content("Evenements & alertes", "horizontal")
+  local content_bars = new_tab_content("Recherche & Vie", "vertical")
+  local content_ambiance = new_tab_content("Ambiance", "vertical")
+  local content_watches = new_tab_content("Alertes personnalisees", "vertical")
+  local content_explorer = new_tab_content("Explorateur", "vertical")
+  local content_export = new_tab_content("Export / Import", "vertical")
 
   pane.selected_tab_index = TAB_CONFIG
 
@@ -1263,9 +1239,9 @@ function gui.on_click(event)
       mapping.custom_alert_watches = deep_copy(draft)
       write_mapping_file(player)
       player.print("Chroma Bridge : alertes personnalisees mises a jour.")
-      local row = config_row(player)
-      if row then
-        build_list(row.chroma_list_scroll, player)
+      local content = tab_content(player, TAB_CONFIG)
+      if content then
+        build_list(content.chroma_list_scroll, player)
       end
     end
     return
@@ -1293,9 +1269,9 @@ function gui.on_click(event)
     write_mapping_file(player)
     player.print("Chroma Bridge : configuration importee.")
     if field then field.text = "" end
-    local row = config_row(player)
-    if row then
-      build_list(row.chroma_list_scroll, player)
+    local content = tab_content(player, TAB_CONFIG)
+    if content then
+      build_list(content.chroma_list_scroll, player)
     end
     return
   end
