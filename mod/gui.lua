@@ -984,12 +984,14 @@ function gui.toggle(player)
 
   local window = screen.add{type = "frame", name = "chroma_bridge_window", direction = "vertical"}
   window.auto_center = true
-  -- La fenetre elle-meme n'a pas besoin de plafond explicite : sa taille
-  -- naturelle decoule de ses enfants (barre de titre, selecteur de layout,
-  -- puis le pane plafonne plus bas). stretchable=false pour ne pas grandir
-  -- au-dela de ce que ces enfants demandent.
+  -- horizontally_stretchable=false : la fenetre ne s'etire pas au-dela de
+  -- ce que ses enfants demandent (proprete depuis la toute premiere version
+  -- a onglets). maximal_height : PLAFOND sur la fenetre elle-meme -- voir
+  -- plus bas pourquoi ce n'est plus le pane qui porte de contrainte de
+  -- hauteur.
   window.style.horizontally_stretchable = false
   window.style.vertically_stretchable = false
+  window.style.maximal_height = window_max_h
 
   -- Barre de titre construite a la main (au lieu du parametre `caption` du
   -- frame) pour pouvoir y accrocher un bouton "fermer" -- convention
@@ -1021,22 +1023,20 @@ function gui.toggle(player)
   pane.style.horizontally_stretchable = false
   pane.style.vertically_stretchable = false
 
-  -- Historique : v1.8.10-1.8.13 ont essaye de FIXER la taille du pane
-  -- (style.width/height, min=max) -- a chaque fois, rendu casse en jeu
-  -- (fenetre reduite a son bandeau de titre, rien en dessous), meme apres
-  -- avoir deplace l'affectation apres l'ajout des onglets et retente sans
-  -- fixer la hauteur. Un seul point commun aux trois echecs : fixer une
-  -- dimension EXACTE (pas juste un plafond) sur le pane lui-meme. On
-  -- revient donc au SEUL reglage confirme fonctionner en jeu (deja utilise
-  -- des la toute premiere version) : un plafond (maximal_width/height),
-  -- jamais une taille exacte, sur le pane. L'homogeneite de taille entre
-  -- onglets (demande separee) passe par un plancher (minimal_width/height)
-  -- sur le contenu de CHAQUE onglet plus bas, pas par une taille fixee sur
-  -- le pane.
+  -- Historique (v1.8.9 a v1.8.14) : TOUTE contrainte de HAUTEUR posee
+  -- directement sur le tabbed-pane -- que ce soit une taille exacte
+  -- (style.height) ou meme un simple plafond (style.maximal_height) --
+  -- a chaque fois rendu casse en jeu (fenetre reduite a son bandeau de
+  -- titre, rien en dessous, aucune erreur de script). La LARGEUR
+  -- (maximal_width), elle, n'a jamais pose ce probleme, sur aucune
+  -- version testee depuis la toute premiere fenetre a onglets. Le pane ne
+  -- recoit donc plus AUCUN style lie a la hauteur (ni height, ni
+  -- maximal_height, ni minimal_height) -- la hauteur totale de la fenetre
+  -- est bornee via window.style.maximal_height ci-dessus a la place, qui
+  -- lui n'a jamais pose de probleme (deja utilise sans souci de la v1.8.6
+  -- a la v1.8.8).
   local PANE_MAX_WIDTH = math.floor(math.max(780, math.min(window_max_w, avail_w * 0.45)))
-  local PANE_MAX_HEIGHT = math.floor(math.max(520, math.min(window_max_h - 80, avail_h * 0.55)))
   pane.style.maximal_width = PANE_MAX_WIDTH
-  pane.style.maximal_height = PANE_MAX_HEIGHT
 
   -- Plancher commun applique au contenu de chaque onglet (pas au pane) pour
   -- qu'aucun onglet peu charge (Ambiance, Recherche & Vie) ne rende une
@@ -1045,7 +1045,7 @@ function gui.toggle(player)
   -- dont le contenu a besoin de plus de place, seulement l'empecher d'etre
   -- plus PETIT que ce plancher.
   local TAB_MIN_WIDTH = math.min(780, PANE_MAX_WIDTH)
-  local TAB_MIN_HEIGHT = math.min(480, PANE_MAX_HEIGHT)
+  local TAB_MIN_HEIGHT = math.min(480, window_max_h - 80)
 
   local function new_tab_content(caption, direction)
     local tab = pane.add{type = "tab", caption = caption}
