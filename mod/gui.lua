@@ -477,6 +477,11 @@ local function build_config_tab(player)
   local list_scroll = content.add{type = "scroll-pane", name = "chroma_list_scroll", direction = "vertical"}
   list_scroll.style.minimal_width = 280
   list_scroll.style.maximal_height = 480
+  -- Remplit la hauteur du plancher commun TAB_MIN_HEIGHT (voir gui.toggle)
+  -- au lieu de s'arreter net a son propre contenu et de laisser un vide
+  -- gris en dessous -- la scrollbar reste utile si la liste elle-meme
+  -- depasse les 480px (maximal_height ci-dessus), independamment de ca.
+  list_scroll.style.vertically_stretchable = true
   build_list(list_scroll, player)
 
   local detail = content.add{type = "flow", name = "chroma_detail_flow", direction = "vertical"}
@@ -825,6 +830,8 @@ local function build_explorer_tab(player)
   local list_scroll = content.add{type = "scroll-pane", name = "chroma_explorer_list", direction = "vertical"}
   list_scroll.style.minimal_width = 560
   list_scroll.style.maximal_height = 420
+  list_scroll.style.horizontally_stretchable = true
+  list_scroll.style.vertically_stretchable = true
 
   content.add{type = "label", name = "chroma_explorer_count_label", caption = ""}
 
@@ -860,6 +867,8 @@ local function build_watches_tab(player)
   local list_scroll = content.add{type = "scroll-pane", name = "chroma_watches_list", direction = "vertical"}
   list_scroll.style.minimal_width = 560
   list_scroll.style.maximal_height = 300
+  list_scroll.style.horizontally_stretchable = true
+  list_scroll.style.vertically_stretchable = true
 
   local bottom = content.add{type = "flow", direction = "horizontal"}
   bottom.add{type = "button", name = "chroma_watch_add_button", caption = "+ Ajouter une alerte"}
@@ -911,6 +920,7 @@ local function build_export_tab(player)
   }
   export_field.style.minimal_width = 560
   export_field.style.minimal_height = 140
+  export_field.style.horizontally_stretchable = true
 
   content.add{type = "line"}
   content.add{
@@ -921,6 +931,7 @@ local function build_export_tab(player)
   local import_field = content.add{type = "text-box", name = "chroma_import_input", text = "", word_wrap = true}
   import_field.style.minimal_width = 560
   import_field.style.minimal_height = 140
+  import_field.style.horizontally_stretchable = true
 
   content.add{type = "line"}
   content.add{type = "button", name = "chroma_import_button", caption = "Importer"}
@@ -971,7 +982,16 @@ function gui.toggle(player)
   -- window_max_w/window_max_h ci-dessus uniquement si le contenu depasserait
   -- l'ecran du joueur -- sinon la fenetre reste a sa taille naturelle, plus
   -- petite).
+  -- horizontally_stretchable=false existait deja depuis v1.8.5 (evite que
+  -- la fenetre s'etire sur toute la largeur de l'ecran). vertically_
+  -- stretchable a la MEME valeur par defaut (true) sur le tabbed-pane, mais
+  -- ca n'avait pas d'impact visible tant qu'aucun plafond de hauteur
+  -- n'existait -- des l'ajout de window_max_h (v1.8.6) et du plancher
+  -- TAB_MIN_HEIGHT (v1.8.8), la fenetre s'etirait systematiquement jusqu'a
+  -- window_max_h (quasi tout l'ecran), meme pour un onglet dont le contenu
+  -- tient dans 200px -- l'espace vide massif remonte sur les captures.
   window.style.horizontally_stretchable = false
+  window.style.vertically_stretchable = false
   window.style.maximal_width = window_max_w
   window.style.maximal_height = window_max_h
 
@@ -1000,6 +1020,7 @@ function gui.toggle(player)
 
   local pane = window.add{type = "tabbed-pane", name = "chroma_tabbed_pane"}
   pane.style.horizontally_stretchable = false
+  pane.style.vertically_stretchable = false
   pane.style.maximal_width = window_max_w
 
   -- Chaque onglet gardait sa largeur/hauteur NATURELLE (v1.8.6) : correct
