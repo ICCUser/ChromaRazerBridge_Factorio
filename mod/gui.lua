@@ -1006,12 +1006,12 @@ function gui.toggle(player)
   drag_handle.style.horizontally_stretchable = true
   drag_handle.style.height = 24
   drag_handle.style.right_margin = 4
-  -- "utility/close" seul n'est pas un sprite valide -- convention vanilla
-  -- (confirmee via le style guide GUI de la communaute) : sprite normal
-  -- utility/close_white, sprite au survol/clic utility/close_black.
+  -- "utility/close_white" (essaye en v1.8.11) n'existe pas sur Factorio 2.0
+  -- -- confirme par factorio-current.log ("Unknown sprite"). "utility/close"
+  -- est le sprite valide sur cette version.
   titlebar.add{
     type = "sprite-button", name = "chroma_close_button", style = "frame_action_button", tooltip = "Fermer",
-    sprite = "utility/close_white", hovered_sprite = "utility/close_black", clicked_sprite = "utility/close_black",
+    sprite = "utility/close",
   }
 
   local top = window.add{type = "flow", direction = "horizontal"}
@@ -1023,18 +1023,13 @@ function gui.toggle(player)
   pane.style.horizontally_stretchable = false
   pane.style.vertically_stretchable = false
 
-  -- Historique (v1.8.9 a v1.8.14) : TOUTE contrainte de HAUTEUR posee
-  -- directement sur le tabbed-pane -- que ce soit une taille exacte
-  -- (style.height) ou meme un simple plafond (style.maximal_height) --
-  -- a chaque fois rendu casse en jeu (fenetre reduite a son bandeau de
-  -- titre, rien en dessous, aucune erreur de script). La LARGEUR
-  -- (maximal_width), elle, n'a jamais pose ce probleme, sur aucune
-  -- version testee depuis la toute premiere fenetre a onglets. Le pane ne
-  -- recoit donc plus AUCUN style lie a la hauteur (ni height, ni
-  -- maximal_height, ni minimal_height) -- la hauteur totale de la fenetre
-  -- est bornee via window.style.maximal_height ci-dessus a la place, qui
-  -- lui n'a jamais pose de probleme (deja utilise sans souci de la v1.8.6
-  -- a la v1.8.8).
+  -- Largeur plafonnee sur le pane (jamais de taille exacte, voir doc
+  -- LuaStyle : minimal/maximal laissent le contenu determiner sa propre
+  -- taille naturelle dans ces bornes). La hauteur totale, elle, est bornee
+  -- via window.style.maximal_height ci-dessus plutot que directement sur le
+  -- pane -- le tabbed-pane ne redimensionne pas onglet par onglet (limite
+  -- connue du moteur, sans interface de modding pour ca), plus simple de
+  -- laisser la fenetre porter cette contrainte.
   local PANE_MAX_WIDTH = math.floor(math.max(780, math.min(window_max_w, avail_w * 0.45)))
   pane.style.maximal_width = PANE_MAX_WIDTH
 
