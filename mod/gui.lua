@@ -334,6 +334,23 @@ local function section_label(parent, text)
   parent.add{type = "label", caption = "[font=default-bold]" .. text .. "[/font]"}
 end
 
+-- Un label Factorio ne retourne JAMAIS a la ligne tout seul (confirme dans
+-- la doc LuaGuiElement, 2.0.77 : rendu sur une seule ligne sauf contrainte
+-- de largeur explicite) -- les textes d'explication longs (Ambiance,
+-- Alertes personnalisees, Explorateur, Export/Import) demandaient donc
+-- toute leur largeur naturelle d'un coup, forcant le reste de l'onglet a
+-- s'elargir en consequence -- la scrollbar horizontale parasite constatee
+-- en jeu. single_line=false + maximal_width force le retour a la ligne
+-- dans une largeur raisonnable, commune a tous les onglets.
+local DESCRIPTION_WRAP_WIDTH = 820
+
+local function description_label(parent, text)
+  local label = parent.add{type = "label", caption = "[color=150,150,150]" .. text .. "[/color]"}
+  label.style.single_line = false
+  label.style.maximal_width = DESCRIPTION_WRAP_WIDTH
+  return label
+end
+
 -- gui.on_click / gui.on_value_changed dispatchaient chacun 7 blocs quasi
 -- identiques (couleur d'un event/alerte, barre recherche x2, barre vie x2,
 -- ambiance x2) : un clic sur une pastille de preset, ou un glissement de
@@ -521,7 +538,11 @@ local function build_config_tab(player)
   row.style.horizontal_spacing = 12
 
   local list_scroll = row.add{type = "scroll-pane", name = "chroma_list_scroll", direction = "vertical"}
-  list_scroll.style.minimal_width = 280
+  -- 280 (jusqu'a v1.8.20) etait trop etroit pour le plus long libelle
+  -- ("[Alerte] Sous-alimentation electrique (autour de toi)") -- constate
+  -- en jeu, ca declenchait une scrollbar horizontale parasite sur la
+  -- liste. 400 : marge confortable au-dessus de ce qu'il faut reellement.
+  list_scroll.style.minimal_width = 400
   list_scroll.style.maximal_height = 480
   build_list(list_scroll, player)
 
@@ -755,11 +776,8 @@ local function build_ambiance_tab(player)
     caption = "Reactif a l'etat de la partie (evolution des biters, pollution, jour/nuit)",
     state = draft.ambient_reactive or false,
   }
-  content.add{
-    type = "label",
-    caption = "[color=150,150,150]Si coche, les deux couleurs ci-dessus sont ignorees : le clavier suit"
-      .. " automatiquement l'ambiance (rouge si evolution elevee, jaune si pollution forte, bleu la nuit...).[/color]",
-  }
+  description_label(content, "Si coche, les deux couleurs ci-dessus sont ignorees : le clavier suit"
+    .. " automatiquement l'ambiance (rouge si evolution elevee, jaune si pollution forte, bleu la nuit...).")
 
   content.add{type = "line"}
   content.add{type = "button", name = "chroma_kd_apply_button", caption = "Appliquer"}
@@ -857,11 +875,8 @@ local function build_explorer_tab(player)
   local cat_dd = filters.add{type = "drop-down", name = "chroma_explorer_category_dropdown", items = event_explorer.categories(_catalog_cache)}
   cat_dd.selected_index = 1
 
-  content.add{
-    type = "label",
-    caption = "[color=150,150,150]Vert = deja relie a un effet Chroma (clique pour l'ouvrir dans Evenements & "
-      .. "alertes). Le reste est juste pour reference -- dis quels events t'interessent pour qu'on les cable.[/color]",
-  }
+  description_label(content, "Vert = deja relie a un effet Chroma (clique pour l'ouvrir dans Evenements & "
+    .. "alertes). Le reste est juste pour reference -- dis quels events t'interessent pour qu'on les cable.")
 
   local list_scroll = content.add{type = "scroll-pane", name = "chroma_explorer_list", direction = "vertical"}
   list_scroll.style.minimal_width = 560
@@ -893,12 +908,9 @@ local function build_watches_tab(player)
   if not content then return end
   content.clear()
 
-  content.add{
-    type = "label",
-    caption = "[color=150,150,150]Detecte le message d'un haut-parleur programmable (case 'Alerte' cochee + texte "
-      .. "libre, ex: 'Automall Frozen!!'). La correspondance ignore la casse et cherche le texte n'importe ou dans "
-      .. "le message. Une fois appliquee, la watch apparait dans Evenements & alertes pour choisir sa couleur.[/color]",
-  }
+  description_label(content, "Detecte le message d'un haut-parleur programmable (case 'Alerte' cochee + texte "
+    .. "libre, ex: 'Automall Frozen!!'). La correspondance ignore la casse et cherche le texte n'importe ou dans "
+    .. "le message. Une fois appliquee, la watch apparait dans Evenements & alertes pour choisir sa couleur.")
 
   local list_scroll = content.add{type = "scroll-pane", name = "chroma_watches_list", direction = "vertical"}
   list_scroll.style.minimal_width = 560
@@ -944,11 +956,8 @@ local function build_export_tab(player)
   if not content then return end
   content.clear()
 
-  content.add{
-    type = "label",
-    caption = "[color=150,150,150]Ta configuration actuelle, en JSON -- selectionne le texte "
-      .. "(Ctrl+A puis Ctrl+C) et garde-le de cote pour la restaurer plus tard ou la partager.[/color]",
-  }
+  description_label(content, "Ta configuration actuelle, en JSON -- selectionne le texte "
+    .. "(Ctrl+A puis Ctrl+C) et garde-le de cote pour la restaurer plus tard ou la partager.")
   local export_field = content.add{
     type = "text-box", name = "chroma_export_output",
     text = helpers.table_to_json(player_mapping(player)),
@@ -959,11 +968,8 @@ local function build_export_tab(player)
   export_field.style.horizontally_stretchable = true
 
   content.add{type = "line"}
-  content.add{
-    type = "label",
-    caption = "[color=150,150,150]Colle ici une configuration exportee (la tienne ou celle d'un autre "
-      .. "joueur) puis clique Importer -- ca REMPLACE entierement ta configuration actuelle.[/color]",
-  }
+  description_label(content, "Colle ici une configuration exportee (la tienne ou celle d'un autre "
+    .. "joueur) puis clique Importer -- ca REMPLACE entierement ta configuration actuelle.")
   local import_field = content.add{type = "text-box", name = "chroma_import_input", text = "", word_wrap = true}
   import_field.style.minimal_width = 560
   import_field.style.minimal_height = 140
