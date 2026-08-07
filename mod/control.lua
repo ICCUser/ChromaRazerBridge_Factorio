@@ -91,6 +91,19 @@ local function record_mod_count(key, mod_name)
   storage.chroma_mod_counts[key][mod_name] = (storage.chroma_mod_counts[key][mod_name] or 0) + 1
 end
 
+-- 5 des 6 gestionnaires d'evenements plus bas (tous sauf on_player_crafted_item,
+-- prive/throttle/fichier different -- voir plus bas) font exactement la meme
+-- chose une fois leurs conditions specifiques passees : ecrire dans le canal
+-- partage chroma_events.jsonl puis alimenter le compteur par mod. Factorise
+-- ici pour que ces deux ecritures (type/cle) ne puissent pas driver l'une de
+-- l'autre au fil des futures evolutions.
+local function emit_shared_event(event_type, extra_fields, mod_source)
+  extra_fields.type = event_type
+  extra_fields.tick = game.tick
+  util.safe_write_json("chroma_events.jsonl", extra_fields, true)
+  record_mod_count(event_type, event_explorer.mod_of(mod_source))
+end
+
 -- Compare le message de chaque alerte "custom" (haut-parleur programmable,
 -- case "Alerte" + texte libre) au match_text de chaque watch defini par CE
 -- joueur (storage.player_mappings[...].custom_alert_watches, voir gui.lua).
@@ -387,12 +400,7 @@ script.on_nth_tick(EVENTS_RESET_INTERVAL_TICKS, reset_events_files)
 
 -- Evenement : recherche terminee
 script.on_event(defines.events.on_research_finished, function(event)
-  util.safe_write_json("chroma_events.jsonl", {
-    type = "research_finished",
-    tick = game.tick,
-    research = event.research.name,
-  }, true)
-  record_mod_count("research_finished", event_explorer.mod_of(event.research))
+  emit_shared_event("research_finished", {research = event.research.name}, event.research)
 end)
 
 -- Evenement : entite du joueur endommagee (attaque de biters typiquement).
@@ -406,47 +414,30 @@ script.on_event(defines.events.on_entity_damaged, function(event)
         return
       end
       last_base_attack_event_tick = game.tick
-      util.safe_write_json("chroma_events.jsonl", {
-        type = "base_under_attack",
-        tick = game.tick,
-        entity = event.entity.name,
-      }, true)
-      record_mod_count("base_under_attack", event_explorer.mod_of(event.entity.prototype))
+      emit_shared_event("base_under_attack", {entity = event.entity.name}, event.entity.prototype)
     end
   end
 end)
 
 -- Evenement : fusee lancee
 script.on_event(defines.events.on_rocket_launched, function(event)
-  util.safe_write_json("chroma_events.jsonl", {
-    type = "rocket_launched",
-    tick = game.tick,
-  }, true)
   local silo_or_rocket = event.rocket_silo or event.rocket
-  record_mod_count("rocket_launched", event_explorer.mod_of(silo_or_rocket and silo_or_rocket.prototype))
+  emit_shared_event("rocket_launched", {}, silo_or_rocket and silo_or_rocket.prototype)
 end)
 
 -- Evenement : joueur mort. Volontairement PARTAGE (pas cible sur
 -- event.player_index) : savoir qu'un coequipier vient de mourir est une
 -- alerte d'equipe utile pour tout le monde, pas seulement pour la victime.
 script.on_event(defines.events.on_player_died, function(event)
-  util.safe_write_json("chroma_events.jsonl", {
-    type = "player_died",
-    tick = game.tick,
-  }, true)
-  record_mod_count("player_died", event_explorer.mod_of(event.cause and event.cause.prototype))
+  emit_shared_event("player_died", {}, event.cause and event.cause.prototype)
 end)
 
 -- Evenement : train arrive a quai
 script.on_event(defines.events.on_train_changed_state, function(event)
   local train = event.train
   if train.valid and train.state == defines.train_state.wait_station then
-    util.safe_write_json("chroma_events.jsonl", {
-      type = "train_arrived",
-      tick = game.tick,
-      station = train.station and train.station.backer_name or nil,
-    }, true)
-    record_mod_count("train_arrived", event_explorer.mod_of(train.station and train.station.prototype))
+    local station_name = train.station and train.station.backer_name or nil
+    emit_shared_event("train_arrived", {station = station_name}, train.station and train.station.prototype)
   end
 end)
 

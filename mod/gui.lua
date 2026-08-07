@@ -335,6 +335,37 @@ local function section_label(parent, text)
   parent.add{type = "label", caption = "[font=default-bold]" .. text .. "[/font]"}
 end
 
+-- gui.on_click / gui.on_value_changed dispatchaient chacun 7 blocs quasi
+-- identiques (couleur d'un event/alerte, barre recherche x2, barre vie x2,
+-- ambiance x2) : un clic sur une pastille de preset, ou un glissement de
+-- slider R/G/B, met a jour un champ couleur d'un draft puis reconstruit
+-- l'onglet concerne. Les deux helpers ci-dessous portent cette logique une
+-- seule fois -- seuls le prefixe de nom d'element et le draft/champ/onglet
+-- cible changent d'un appelant a l'autre. Renvoient false sans rien faire
+-- si le nom ne correspond pas ou si le draft est absent (fenetre fermee
+-- entre-temps), pour que l'appelant enchaine sur le prochain candidat.
+local function try_color_preset(name, prefix, draft, field, rebuild, player)
+  if not draft then return false end
+  local index = name:match("^" .. prefix .. "_preset__(%d+)$")
+  if not index then return false end
+  draft[field] = deep_copy(COLOR_PRESETS[tonumber(index)])
+  rebuild(player)
+  return true
+end
+
+local function try_rgb_slider(name, value, prefix, draft, field, default_color, rebuild, player)
+  if not draft then return false end
+  local channel
+  if name == prefix .. "_slider_r" then channel = 1
+  elseif name == prefix .. "_slider_g" then channel = 2
+  elseif name == prefix .. "_slider_b" then channel = 3
+  else return false end
+  draft[field] = draft[field] or deep_copy(default_color)
+  draft[field][channel] = value
+  rebuild(player)
+  return true
+end
+
 -- --- Onglet "Evenements & alertes" (liste + detail) ---
 
 local function build_list(parent, player)
@@ -991,14 +1022,10 @@ function gui.toggle(player)
 
   -- Barre de titre construite a la main (au lieu du parametre `caption` du
   -- frame) pour pouvoir y accrocher un bouton "fermer" -- convention
-  -- standard des fenetres Factorio (vanilla et mods). Contrairement au
-  -- bouton "Fermer" precedent, place tout en bas de la fenetre : celui-la
-  -- disparaissait derriere le bord de l'ecran des que le contenu d'un onglet
-  -- (ex: la liste de l'Explorateur) rendait la fenetre plus haute que
-  -- l'ecran -- et donnait l'impression de n'exister que sur l'onglet Config,
-  -- le seul assez court pour laisser le bouton visible. Ici, la barre de
-  -- titre est au-dessus du tabbed-pane : toujours visible, sur tous les
-  -- onglets, quelle que soit leur hauteur.
+  -- standard des fenetres Factorio (vanilla et mods). Au-dessus du
+  -- tabbed-pane : toujours visible, sur tous les onglets, quelle que soit
+  -- leur hauteur (un bouton place en bas du contenu, lui, dependrait de la
+  -- hauteur de l'onglet courant).
   local titlebar = window.add{type = "flow", direction = "horizontal"}
   titlebar.drag_target = window
   titlebar.add{type = "label", caption = "Chroma Bridge", style = "frame_title", ignored_by_interaction = true}
@@ -1023,24 +1050,17 @@ function gui.toggle(player)
   pane.style.horizontally_stretchable = false
   pane.style.vertically_stretchable = false
 
-  -- v1.8.6-1.8.9 essayaient d'obtenir une taille "naturelle mais plafonnee"
-  -- via minimal_width/height + maximal_width/height + stretchable=false.
-  -- Constat en jeu (captures) : le resultat reste instable -- la fenetre
-  -- s'etire quand meme jusqu'a son plafond au lieu de s'adapter au contenu
-  -- de l'onglet affiche, quel que soit l'onglet. Plutot que de continuer a
-  -- deviner le comportement exact du tabbed-pane sans pouvoir le verifier
-  -- visuellement, on fixe maintenant une taille DETERMINISTE (style.width /
-  -- style.height, qui fixent minimal ET maximal en une seule fois -- meme
-  -- mecanisme que ce qui limitait deja correctement la largeur en v1.8.5,
-  -- juste trop etroit a l'epoque) pour le pane lui-meme : garantit une boite
-  -- identique sur tous les onglets, par construction, sans dependre d'une
-  -- negociation de stretch ambigue.
+  -- Taille du pane FIXEE (style.width/height fixent minimal ET maximal en
+  -- une seule fois) plutot que laissee "naturelle mais plafonnee" : le
+  -- tabbed-pane ne redimensionne pas fiablement onglet par onglet (aucune
+  -- interface de modding pour ca -- limitation connue du moteur, confirmee
+  -- sur le forum officiel). Une taille fixe garantit la meme boite sur les 6
+  -- onglets par construction, sans dependre de ce comportement.
   --
   -- Consequence : chaque onglet doit pouvoir gerer un contenu plus grand que
   -- la boite -- chacun devient donc un scroll-pane (au lieu d'un simple
   -- flow) qui remplit cette boite fixe (stretchable=true) ; le contenu qui
-  -- deborde scrolle DANS sa boite au lieu soit de deborder de l'ecran, soit
-  -- de forcer toute la fenetre a grandir de facon incoherente.
+  -- deborde scrolle DANS sa boite au lieu de deborder de l'ecran.
   local PANE_WIDTH = math.floor(math.max(780, math.min(window_max_w, avail_w * 0.45)))
   local PANE_HEIGHT = math.floor(math.max(520, math.min(window_max_h - 80, avail_h * 0.55)))
   pane.style.width = PANE_WIDTH
@@ -1129,13 +1149,8 @@ function gui.on_click(event)
     return
   end
 
-  local preset_index = name:match("^chroma_color_preset__(%d+)$")
-  if preset_index then
-    local draft = storage.chroma_draft[player.index]
-    if draft then
-      draft.cfg.color = deep_copy(COLOR_PRESETS[tonumber(preset_index)])
-      build_detail(player)
-    end
+  local config_draft = storage.chroma_draft[player.index]
+  if try_color_preset(name, "chroma_color", config_draft and config_draft.cfg, "color", build_detail, player) then
     return
   end
 
@@ -1166,25 +1181,9 @@ function gui.on_click(event)
     return
   end
 
-  local rb_bar_preset = name:match("^chroma_rb_bar_preset__(%d+)$")
-  if rb_bar_preset then
-    local draft = storage.chroma_research_draft[player.index]
-    if draft then
-      draft.color_bar = deep_copy(COLOR_PRESETS[tonumber(rb_bar_preset)])
-      build_bars_tab(player)
-    end
-    return
-  end
-
-  local rb_empty_preset = name:match("^chroma_rb_empty_preset__(%d+)$")
-  if rb_empty_preset then
-    local draft = storage.chroma_research_draft[player.index]
-    if draft then
-      draft.color_empty = deep_copy(COLOR_PRESETS[tonumber(rb_empty_preset)])
-      build_bars_tab(player)
-    end
-    return
-  end
+  local rb_draft = storage.chroma_research_draft[player.index]
+  if try_color_preset(name, "chroma_rb_bar", rb_draft, "color_bar", build_bars_tab, player) then return end
+  if try_color_preset(name, "chroma_rb_empty", rb_draft, "color_empty", build_bars_tab, player) then return end
 
   if name == "chroma_hb_open_picker_button" then
     gui.toggle_keyboard_picker(player, "health_bar")
@@ -1201,25 +1200,9 @@ function gui.on_click(event)
     return
   end
 
-  local hb_bar_preset = name:match("^chroma_hb_bar_preset__(%d+)$")
-  if hb_bar_preset then
-    local draft = storage.chroma_health_draft[player.index]
-    if draft then
-      draft.color_bar = deep_copy(COLOR_PRESETS[tonumber(hb_bar_preset)])
-      build_bars_tab(player)
-    end
-    return
-  end
-
-  local hb_empty_preset = name:match("^chroma_hb_empty_preset__(%d+)$")
-  if hb_empty_preset then
-    local draft = storage.chroma_health_draft[player.index]
-    if draft then
-      draft.color_empty = deep_copy(COLOR_PRESETS[tonumber(hb_empty_preset)])
-      build_bars_tab(player)
-    end
-    return
-  end
+  local hb_draft = storage.chroma_health_draft[player.index]
+  if try_color_preset(name, "chroma_hb_bar", hb_draft, "color_bar", build_bars_tab, player) then return end
+  if try_color_preset(name, "chroma_hb_empty", hb_draft, "color_empty", build_bars_tab, player) then return end
 
   if name == "chroma_kd_apply_button" then
     local draft = storage.chroma_default_draft[player.index]
@@ -1238,25 +1221,9 @@ function gui.on_click(event)
     return
   end
 
-  local kd_c1_preset = name:match("^chroma_kd_c1_preset__(%d+)$")
-  if kd_c1_preset then
-    local draft = storage.chroma_default_draft[player.index]
-    if draft then
-      draft.color1 = deep_copy(COLOR_PRESETS[tonumber(kd_c1_preset)])
-      build_ambiance_tab(player)
-    end
-    return
-  end
-
-  local kd_c2_preset = name:match("^chroma_kd_c2_preset__(%d+)$")
-  if kd_c2_preset then
-    local draft = storage.chroma_default_draft[player.index]
-    if draft then
-      draft.color2 = deep_copy(COLOR_PRESETS[tonumber(kd_c2_preset)])
-      build_ambiance_tab(player)
-    end
-    return
-  end
+  local kd_draft = storage.chroma_default_draft[player.index]
+  if try_color_preset(name, "chroma_kd_c1", kd_draft, "color1", build_ambiance_tab, player) then return end
+  if try_color_preset(name, "chroma_kd_c2", kd_draft, "color2", build_ambiance_tab, player) then return end
 
   if name == "chroma_watch_add_button" then
     local draft = storage.chroma_watches_draft[player.index]
@@ -1538,80 +1505,19 @@ function gui.on_value_changed(event)
   local name = element.name
   local value = element.slider_value
 
-  if name == "chroma_rb_bar_slider_r" or name == "chroma_rb_bar_slider_g" or name == "chroma_rb_bar_slider_b" then
-    local rb_draft = storage.chroma_research_draft[player.index]
-    if rb_draft then
-      rb_draft.color_bar = rb_draft.color_bar or {0, 255, 60}
-      if name == "chroma_rb_bar_slider_r" then rb_draft.color_bar[1] = value end
-      if name == "chroma_rb_bar_slider_g" then rb_draft.color_bar[2] = value end
-      if name == "chroma_rb_bar_slider_b" then rb_draft.color_bar[3] = value end
-      build_bars_tab(player)
-    end
-    return
-  end
+  local rb_draft = storage.chroma_research_draft[player.index]
+  if try_rgb_slider(name, value, "chroma_rb_bar", rb_draft, "color_bar", {0, 255, 60}, build_bars_tab, player) then return end
+  if try_rgb_slider(name, value, "chroma_rb_empty", rb_draft, "color_empty", {20, 20, 20}, build_bars_tab, player) then return end
 
-  if name == "chroma_rb_empty_slider_r" or name == "chroma_rb_empty_slider_g" or name == "chroma_rb_empty_slider_b" then
-    local rb_draft = storage.chroma_research_draft[player.index]
-    if rb_draft then
-      rb_draft.color_empty = rb_draft.color_empty or {20, 20, 20}
-      if name == "chroma_rb_empty_slider_r" then rb_draft.color_empty[1] = value end
-      if name == "chroma_rb_empty_slider_g" then rb_draft.color_empty[2] = value end
-      if name == "chroma_rb_empty_slider_b" then rb_draft.color_empty[3] = value end
-      build_bars_tab(player)
-    end
-    return
-  end
+  local hb_draft = storage.chroma_health_draft[player.index]
+  if try_rgb_slider(name, value, "chroma_hb_bar", hb_draft, "color_bar", {0, 255, 0}, build_bars_tab, player) then return end
+  if try_rgb_slider(name, value, "chroma_hb_empty", hb_draft, "color_empty", {40, 0, 0}, build_bars_tab, player) then return end
 
-  if name == "chroma_hb_bar_slider_r" or name == "chroma_hb_bar_slider_g" or name == "chroma_hb_bar_slider_b" then
-    local hb_draft = storage.chroma_health_draft[player.index]
-    if hb_draft then
-      hb_draft.color_bar = hb_draft.color_bar or {0, 255, 0}
-      if name == "chroma_hb_bar_slider_r" then hb_draft.color_bar[1] = value end
-      if name == "chroma_hb_bar_slider_g" then hb_draft.color_bar[2] = value end
-      if name == "chroma_hb_bar_slider_b" then hb_draft.color_bar[3] = value end
-      build_bars_tab(player)
-    end
-    return
-  end
-
-  if name == "chroma_hb_empty_slider_r" or name == "chroma_hb_empty_slider_g" or name == "chroma_hb_empty_slider_b" then
-    local hb_draft = storage.chroma_health_draft[player.index]
-    if hb_draft then
-      hb_draft.color_empty = hb_draft.color_empty or {40, 0, 0}
-      if name == "chroma_hb_empty_slider_r" then hb_draft.color_empty[1] = value end
-      if name == "chroma_hb_empty_slider_g" then hb_draft.color_empty[2] = value end
-      if name == "chroma_hb_empty_slider_b" then hb_draft.color_empty[3] = value end
-      build_bars_tab(player)
-    end
-    return
-  end
-
-  if name == "chroma_kd_c1_slider_r" or name == "chroma_kd_c1_slider_g" or name == "chroma_kd_c1_slider_b" then
-    local kd_draft = storage.chroma_default_draft[player.index]
-    if kd_draft then
-      kd_draft.color1 = kd_draft.color1 or {230, 100, 20}
-      if name == "chroma_kd_c1_slider_r" then kd_draft.color1[1] = value end
-      if name == "chroma_kd_c1_slider_g" then kd_draft.color1[2] = value end
-      if name == "chroma_kd_c1_slider_b" then kd_draft.color1[3] = value end
-      build_ambiance_tab(player)
-    end
-    return
-  end
-
-  if name == "chroma_kd_c2_slider_r" or name == "chroma_kd_c2_slider_g" or name == "chroma_kd_c2_slider_b" then
-    local kd_draft = storage.chroma_default_draft[player.index]
-    if kd_draft then
-      kd_draft.color2 = kd_draft.color2 or {20, 10, 0}
-      if name == "chroma_kd_c2_slider_r" then kd_draft.color2[1] = value end
-      if name == "chroma_kd_c2_slider_g" then kd_draft.color2[2] = value end
-      if name == "chroma_kd_c2_slider_b" then kd_draft.color2[3] = value end
-      build_ambiance_tab(player)
-    end
-    return
-  end
+  local kd_draft = storage.chroma_default_draft[player.index]
+  if try_rgb_slider(name, value, "chroma_kd_c1", kd_draft, "color1", {230, 100, 20}, build_ambiance_tab, player) then return end
+  if try_rgb_slider(name, value, "chroma_kd_c2", kd_draft, "color2", {20, 10, 0}, build_ambiance_tab, player) then return end
 
   if name == "chroma_kd_speed_slider" then
-    local kd_draft = storage.chroma_default_draft[player.index]
     if kd_draft then
       kd_draft.breathing_speed = value / 10
       build_ambiance_tab(player)
@@ -1622,13 +1528,9 @@ function gui.on_value_changed(event)
   local draft = storage.chroma_draft[player.index]
   if not draft then return end
 
-  if name == "chroma_slider_r" or name == "chroma_slider_g" or name == "chroma_slider_b" then
-    draft.cfg.color = draft.cfg.color or {255, 255, 255}
-    if name == "chroma_slider_r" then draft.cfg.color[1] = value end
-    if name == "chroma_slider_g" then draft.cfg.color[2] = value end
-    if name == "chroma_slider_b" then draft.cfg.color[3] = value end
-    build_detail(player)
-  elseif name == "chroma_blink_slider" then
+  if try_rgb_slider(name, value, "chroma", draft.cfg, "color", {255, 255, 255}, build_detail, player) then return end
+
+  if name == "chroma_blink_slider" then
     draft.cfg.blink_interval = value / 10
     build_detail(player)
   elseif name == "chroma_hold_slider" then
