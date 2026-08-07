@@ -77,6 +77,16 @@ local function tab_content(player, index)
   return entry and entry.content
 end
 
+-- L'onglet Config (voir build_config_tab) place liste + detail cote a cote
+-- dans un flow horizontal (chroma_config_row), lui-meme seul enfant du
+-- scroll-pane de l'onglet -- necessaire car scroll-pane n'a pas de layout
+-- horizontal possible (voir build_config_tab pour le detail). Un niveau
+-- d'indirection de plus que tab_content, donc son propre helper.
+local function config_row(player)
+  local content = tab_content(player, TAB_CONFIG)
+  return content and content.chroma_config_row
+end
+
 local DEVICES = {
   {key = "all", label = "Tous les peripheriques"},
   {key = "keyboard", label = "Clavier"},
@@ -361,9 +371,9 @@ local function build_list(parent, player)
 end
 
 local function build_detail(player)
-  local content = tab_content(player, TAB_CONFIG)
-  if not content then return end
-  local detail = content.chroma_detail_flow
+  local row = config_row(player)
+  if not row then return end
+  local detail = row.chroma_detail_flow
   detail.clear()
 
   local draft = storage.chroma_draft[player.index]
@@ -472,9 +482,16 @@ local function build_config_tab(player)
   local content = tab_content(player, TAB_CONFIG)
   if not content then return end
   content.clear()
-  content.style.horizontal_spacing = 12
+  -- content est un scroll-pane (v1.8.10, filet de secu si le contenu
+  -- deborde de la boite fixe du pane). Un scroll-pane n'accepte PAS de
+  -- parametre "direction" a la creation (verifie dans la doc
+  -- LuaGuiElement.add) : son layout interne est toujours vertical -- donc
+  -- pour mettre liste et detail cote a cote, il faut un flow horizontal
+  -- explicite comme SEUL enfant direct du scroll-pane.
+  local row = content.add{type = "flow", name = "chroma_config_row", direction = "horizontal"}
+  row.style.horizontally_stretchable = true
 
-  local list_scroll = content.add{type = "scroll-pane", name = "chroma_list_scroll", direction = "vertical"}
+  local list_scroll = row.add{type = "scroll-pane", name = "chroma_list_scroll", direction = "vertical"}
   list_scroll.style.minimal_width = 280
   list_scroll.style.maximal_height = 480
   -- Remplit la hauteur de la boite fixe du pane (voir PANE_HEIGHT dans
@@ -485,8 +502,9 @@ local function build_config_tab(player)
   list_scroll.style.vertically_stretchable = true
   build_list(list_scroll, player)
 
-  local detail = content.add{type = "flow", name = "chroma_detail_flow", direction = "vertical"}
+  local detail = row.add{type = "flow", name = "chroma_detail_flow", direction = "vertical"}
   detail.style.minimal_width = 320
+  detail.style.left_margin = 12
   -- Remplit l'espace restant plutot que de laisser un vide a droite quand la
   -- liste (a gauche) est plus etroite que la largeur fixe du pane (voir
   -- PANE_WIDTH dans gui.toggle).
@@ -947,25 +965,13 @@ function gui.toggle(player)
     return
   end
 
-  -- Avant (v1.8.5) : une largeur FIXE (640px, style.width) forcait sur
-  -- CHAQUE onglet, y compris la liste d'evenements/alertes de l'onglet
-  -- "Config" -- dont les libelles les plus longs ("[Alerte]
-  -- Sous-alimentation electrique (autour de toi)") ont besoin de plus de
-  -- 280px pour s'afficher sans coupure. Une largeur fixee trop etroite pour
-  -- son propre contenu forcait le scroll-pane de la liste a compresser sa
-  -- zone visible et a faire apparaitre une scrollbar horizontale interne --
-  -- exactement le "ca depasse" remonte en jeu, en plus de ne pas s'adapter
-  -- a la resolution reelle du joueur (que ce soit un ecran 1080p trop
-  -- petit pour 640px de large ou un 32" 4K/ultra-wide largement assez
-  -- grand pour bien plus).
-  --
-  -- Ici : chaque onglet garde sa largeur NATURELLE (determinee par son
-  -- propre contenu, pas une constante partagee), et seule la fenetre/le
-  -- tabbed-pane recoit un plafond -- calcule en PROPORTION de la resolution
-  -- d'affichage reelle du joueur (display_resolution/display_scale, en
-  -- pixels GUI, donc deja corrige du DPI/UI-scale) -- pour ne jamais
-  -- depasser l'ecran quelle que soit sa taille, sans pour autant brider
-  -- artificiellement les gros ecrans avec un plafond fixe en pixels.
+  -- Resolution/echelle d'affichage reelles du joueur (display_resolution
+  -- est en pixels ecran bruts, display_scale est le multiplicateur d'echelle
+  -- d'interface -- diviser l'un par l'autre donne l'espace disponible en
+  -- pixels GUI, deja corrige du DPI/UI-scale ; confirme par les devs sur le
+  -- forum officiel comme l'usage prevu de ces deux valeurs conjointement).
+  -- Sert de plafond a PANE_WIDTH/PANE_HEIGHT plus bas : jamais plus grand
+  -- que l'ecran du joueur, petit (1080p) ou grand (32" 4K/ultra-wide).
   local res = player.display_resolution
   local scale = (player.display_scale and player.display_scale > 0) and player.display_scale or 1
   local avail_w = (res and res.width and res.width > 0) and (res.width / scale) or 1920
@@ -999,7 +1005,14 @@ function gui.toggle(player)
   local drag_handle = titlebar.add{type = "empty-widget", style = "draggable_space_header", ignored_by_interaction = true}
   drag_handle.style.horizontally_stretchable = true
   drag_handle.style.height = 24
-  titlebar.add{type = "sprite-button", name = "chroma_close_button", sprite = "utility/close", style = "frame_action_button", tooltip = "Fermer"}
+  drag_handle.style.right_margin = 4
+  -- "utility/close" seul n'est pas un sprite valide -- convention vanilla
+  -- (confirmee via le style guide GUI de la communaute) : sprite normal
+  -- utility/close_white, sprite au survol/clic utility/close_black.
+  titlebar.add{
+    type = "sprite-button", name = "chroma_close_button", style = "frame_action_button", tooltip = "Fermer",
+    sprite = "utility/close_white", hovered_sprite = "utility/close_black", clicked_sprite = "utility/close_black",
+  }
 
   local top = window.add{type = "flow", direction = "horizontal"}
   top.add{type = "label", caption = "Layout clavier :"}
@@ -1033,21 +1046,28 @@ function gui.toggle(player)
   pane.style.width = PANE_WIDTH
   pane.style.height = PANE_HEIGHT
 
-  local function new_tab_content(caption, direction)
+  -- scroll-pane n'accepte PAS de parametre "direction" a la creation
+  -- (contrairement a flow -- verifie dans la doc LuaGuiElement.add : seuls
+  -- horizontal_scroll_policy/vertical_scroll_policy existent). Layout
+  -- interne toujours vertical. Pour l'onglet Config (liste + detail cote a
+  -- cote), voir build_config_tab : un flow horizontal est cree A
+  -- L'INTERIEUR du scroll-pane pour ce layout, le scroll-pane ne servant
+  -- que de filet de secu (scroll si jamais ca deborde de la boite fixe).
+  local function new_tab_content(caption)
     local tab = pane.add{type = "tab", caption = caption}
-    local content = pane.add{type = "scroll-pane", direction = direction}
+    local content = pane.add{type = "scroll-pane"}
     content.style.horizontally_stretchable = true
     content.style.vertically_stretchable = true
     pane.add_tab(tab, content)
     return content
   end
 
-  local content_config = new_tab_content("Evenements & alertes", "horizontal")
-  local content_bars = new_tab_content("Recherche & Vie", "vertical")
-  local content_ambiance = new_tab_content("Ambiance", "vertical")
-  local content_watches = new_tab_content("Alertes personnalisees", "vertical")
-  local content_explorer = new_tab_content("Explorateur", "vertical")
-  local content_export = new_tab_content("Export / Import", "vertical")
+  local content_config = new_tab_content("Evenements & alertes")
+  local content_bars = new_tab_content("Recherche & Vie")
+  local content_ambiance = new_tab_content("Ambiance")
+  local content_watches = new_tab_content("Alertes personnalisees")
+  local content_explorer = new_tab_content("Explorateur")
+  local content_export = new_tab_content("Export / Import")
 
   pane.selected_tab_index = TAB_CONFIG
 
@@ -1278,9 +1298,9 @@ function gui.on_click(event)
       mapping.custom_alert_watches = deep_copy(draft)
       write_mapping_file(player)
       player.print("Chroma Bridge : alertes personnalisees mises a jour.")
-      local config_content = tab_content(player, TAB_CONFIG)
-      if config_content then
-        build_list(config_content.chroma_list_scroll, player)
+      local row = config_row(player)
+      if row then
+        build_list(row.chroma_list_scroll, player)
       end
     end
     return
@@ -1308,9 +1328,9 @@ function gui.on_click(event)
     write_mapping_file(player)
     player.print("Chroma Bridge : configuration importee.")
     if field then field.text = "" end
-    local config_content = tab_content(player, TAB_CONFIG)
-    if config_content then
-      build_list(config_content.chroma_list_scroll, player)
+    local row = config_row(player)
+    if row then
+      build_list(row.chroma_list_scroll, player)
     end
     return
   end
