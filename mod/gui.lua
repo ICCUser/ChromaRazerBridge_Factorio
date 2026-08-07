@@ -1047,6 +1047,16 @@ function gui.toggle(player)
   local function new_tab_content(caption, direction)
     local tab = pane.add{type = "tab", caption = caption}
     local content = pane.add{type = "flow", direction = direction}
+    -- Un flow est stretchable par defaut (meme comportement que la fenetre
+    -- et le pane, voir plus haut) : sans le desactiver ici, le contenu de
+    -- chaque onglet se remplit jusqu'a PANE_MAX_WIDTH/HEIGHT (le plafond du
+    -- pane, potentiellement tres large sur un grand ecran) au lieu de
+    -- s'en tenir a sa taille naturelle -- exactement le fond gris qui
+    -- deborde de la barre d'onglets constate en jeu. minimal_width/height
+    -- (le plancher d'homogeneite, voir plus bas) restent la seule chose qui
+    -- l'empeche d'etre plus PETIT que TAB_MIN_WIDTH/HEIGHT.
+    content.style.horizontally_stretchable = false
+    content.style.vertically_stretchable = false
     content.style.minimal_width = TAB_MIN_WIDTH
     content.style.minimal_height = TAB_MIN_HEIGHT
     pane.add_tab(tab, content)
