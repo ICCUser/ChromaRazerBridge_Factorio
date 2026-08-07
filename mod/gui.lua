@@ -931,8 +931,17 @@ function gui.toggle(player)
     return
   end
 
+  -- Largeur commune a tous les onglets, fixee (pas juste minimale) pour que
+  -- la fenetre ne "saute" pas de taille en changeant d'onglet.
+  local TAB_WIDTH = 640
+
   local window = screen.add{type = "frame", name = "chroma_bridge_window", direction = "vertical", caption = "Chroma Bridge"}
   window.auto_center = true
+  -- Un frame ajoute a gui.screen ne s'etire pas tout seul, mais le
+  -- tabbed-pane qu'il contient (voir plus bas) l'est PAR DEFAUT -- sans ces
+  -- deux lignes, la fenetre entiere s'etirait sur presque toute la largeur
+  -- de l'ecran au lieu de se limiter a la largeur de son contenu.
+  window.style.horizontally_stretchable = false
 
   local top = window.add{type = "flow", direction = "horizontal"}
   top.add{type = "label", caption = "Layout clavier :"}
@@ -940,34 +949,37 @@ function gui.toggle(player)
   layout_dd.selected_index = (current_layout_name(player) == "qwerty_us") and 2 or 1
 
   local pane = window.add{type = "tabbed-pane", name = "chroma_tabbed_pane"}
+  pane.style.horizontally_stretchable = false
+  pane.style.maximal_width = TAB_WIDTH + 20 -- marge pour le cadre interne du tabbed-pane
 
   local tab_config = pane.add{type = "tab", caption = "Evenements & alertes"}
   local content_config = pane.add{type = "flow", direction = "horizontal"}
+  content_config.style.width = TAB_WIDTH
   pane.add_tab(tab_config, content_config)
 
   local tab_bars = pane.add{type = "tab", caption = "Recherche & Vie"}
   local content_bars = pane.add{type = "flow", direction = "vertical"}
-  content_bars.style.minimal_width = 620
+  content_bars.style.width = TAB_WIDTH
   pane.add_tab(tab_bars, content_bars)
 
   local tab_ambiance = pane.add{type = "tab", caption = "Ambiance"}
   local content_ambiance = pane.add{type = "flow", direction = "vertical"}
-  content_ambiance.style.minimal_width = 620
+  content_ambiance.style.width = TAB_WIDTH
   pane.add_tab(tab_ambiance, content_ambiance)
 
   local tab_watches = pane.add{type = "tab", caption = "Alertes personnalisees"}
   local content_watches = pane.add{type = "flow", direction = "vertical"}
-  content_watches.style.minimal_width = 620
+  content_watches.style.width = TAB_WIDTH
   pane.add_tab(tab_watches, content_watches)
 
   local tab_explorer = pane.add{type = "tab", caption = "Explorateur"}
   local content_explorer = pane.add{type = "flow", direction = "vertical"}
-  content_explorer.style.minimal_width = 620
+  content_explorer.style.width = TAB_WIDTH
   pane.add_tab(tab_explorer, content_explorer)
 
   local tab_export = pane.add{type = "tab", caption = "Export / Import"}
   local content_export = pane.add{type = "flow", direction = "vertical"}
-  content_export.style.minimal_width = 620
+  content_export.style.width = TAB_WIDTH
   pane.add_tab(tab_export, content_export)
 
   pane.selected_tab_index = TAB_CONFIG
