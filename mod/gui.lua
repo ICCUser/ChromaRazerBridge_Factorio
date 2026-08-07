@@ -1050,22 +1050,6 @@ function gui.toggle(player)
   pane.style.horizontally_stretchable = false
   pane.style.vertically_stretchable = false
 
-  -- Taille du pane FIXEE (style.width/height fixent minimal ET maximal en
-  -- une seule fois) plutot que laissee "naturelle mais plafonnee" : le
-  -- tabbed-pane ne redimensionne pas fiablement onglet par onglet (aucune
-  -- interface de modding pour ca -- limitation connue du moteur, confirmee
-  -- sur le forum officiel). Une taille fixe garantit la meme boite sur les 6
-  -- onglets par construction, sans dependre de ce comportement.
-  --
-  -- Consequence : chaque onglet doit pouvoir gerer un contenu plus grand que
-  -- la boite -- chacun devient donc un scroll-pane (au lieu d'un simple
-  -- flow) qui remplit cette boite fixe (stretchable=true) ; le contenu qui
-  -- deborde scrolle DANS sa boite au lieu de deborder de l'ecran.
-  local PANE_WIDTH = math.floor(math.max(780, math.min(window_max_w, avail_w * 0.45)))
-  local PANE_HEIGHT = math.floor(math.max(520, math.min(window_max_h - 80, avail_h * 0.55)))
-  pane.style.width = PANE_WIDTH
-  pane.style.height = PANE_HEIGHT
-
   -- scroll-pane n'accepte PAS de parametre "direction" a la creation
   -- (contrairement a flow -- verifie dans la doc LuaGuiElement.add : seuls
   -- horizontal_scroll_policy/vertical_scroll_policy existent). Layout
@@ -1088,6 +1072,20 @@ function gui.toggle(player)
   local content_watches = new_tab_content("Alertes personnalisees")
   local content_explorer = new_tab_content("Explorateur")
   local content_export = new_tab_content("Export / Import")
+
+  -- Taille fixee APRES ajout des onglets (et pas avant, comme en v1.8.10) :
+  -- fixer la taille d'un tabbed-pane encore vide semble perturber son calcul
+  -- de la place reservee a la barre d'onglets, au point de rendre tout le
+  -- contenu invisible une fois les onglets ajoutes (fenetre reduite a son
+  -- bandeau de titre en jeu). width fixe (min=max) comme avant ; height
+  -- seulement PLAFONNEE (maximal_height, pas width/height qui fixerait
+  -- aussi le minimum) -- width a deja fait ses preuves fixe, height jamais,
+  -- donc on prend moins de risque sur cet axe tant que ce n'est pas
+  -- reconfirme en jeu.
+  local PANE_WIDTH = math.floor(math.max(780, math.min(window_max_w, avail_w * 0.45)))
+  local PANE_HEIGHT = math.floor(math.max(520, math.min(window_max_h - 80, avail_h * 0.55)))
+  pane.style.width = PANE_WIDTH
+  pane.style.maximal_height = PANE_HEIGHT
 
   pane.selected_tab_index = TAB_CONFIG
 
