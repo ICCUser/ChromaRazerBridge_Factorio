@@ -1036,13 +1036,17 @@ function gui.toggle(player)
   pane.style.maximal_height = PANE_MAX_HEIGHT
 
   -- Plancher commun applique au contenu de chaque onglet (pas au pane) pour
-  -- qu'aucun onglet peu charge (Ambiance, Recherche & Vie) ne rende une
-  -- boite visiblement plus petite qu'un onglet dense (Config, Explorateur).
-  -- minimal_* seul (jamais width/height) : ne peut jamais ecraser un onglet
-  -- dont le contenu a besoin de plus de place, seulement l'empecher d'etre
-  -- plus PETIT que ce plancher.
+  -- qu'aucun onglet peu charge (constate en jeu : Alertes personnalisees
+  -- tant qu'aucune alerte n'est ajoutee) ne rende une boite visiblement
+  -- plus petite que les autres (Recherche & Vie et Ambiance, par exemple,
+  -- ont largement plus de contenu et depassent deja ce plancher sans qu'il
+  -- les affecte). minimal_* seul (jamais width/height) : ne peut jamais
+  -- ecraser un onglet dont le contenu a besoin de plus de place, seulement
+  -- l'empecher d'etre plus PETIT que ce plancher. Volontairement modeste
+  -- (300, pas 480) : un plancher trop genereux ne fait que deplacer le vide
+  -- au lieu de le reduire pour les onglets les plus legers.
   local TAB_MIN_WIDTH = math.min(780, PANE_MAX_WIDTH)
-  local TAB_MIN_HEIGHT = math.min(480, PANE_MAX_HEIGHT)
+  local TAB_MIN_HEIGHT = math.min(300, PANE_MAX_HEIGHT)
 
   local function new_tab_content(caption, direction)
     local tab = pane.add{type = "tab", caption = caption}
