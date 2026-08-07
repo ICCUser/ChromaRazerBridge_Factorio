@@ -77,6 +77,15 @@ local function tab_content(player, index)
   return entry and entry.content
 end
 
+-- L'onglet Config place liste + detail cote a cote dans un flow horizontal
+-- (chroma_config_row, voir build_config_tab), lui-meme seul enfant du
+-- scroll-pane de l'onglet. Un niveau d'indirection de plus que tab_content,
+-- donc son propre helper.
+local function config_row(player)
+  local content = tab_content(player, TAB_CONFIG)
+  return content and content.chroma_config_row
+end
+
 local DEVICES = {
   {key = "all", label = "Tous les peripheriques"},
   {key = "keyboard", label = "Clavier"},
@@ -392,9 +401,9 @@ local function build_list(parent, player)
 end
 
 local function build_detail(player)
-  local content = tab_content(player, TAB_CONFIG)
-  if not content then return end
-  local detail = content.chroma_detail_flow
+  local row = config_row(player)
+  if not row then return end
+  local detail = row.chroma_detail_flow
   detail.clear()
 
   local draft = storage.chroma_draft[player.index]
@@ -503,14 +512,20 @@ local function build_config_tab(player)
   local content = tab_content(player, TAB_CONFIG)
   if not content then return end
   content.clear()
-  content.style.horizontal_spacing = 12
+  -- content est un scroll-pane (voir new_tab_content dans gui.toggle) :
+  -- pas de layout horizontal possible dessus (verifie dans la doc
+  -- LuaGuiElement.add, 2.0.77 : scroll-pane n'a pas de parametre
+  -- "direction"), donc liste + detail cote a cote passent par un flow
+  -- horizontal explicite, seul enfant direct du scroll-pane.
+  local row = content.add{type = "flow", name = "chroma_config_row", direction = "horizontal"}
+  row.style.horizontal_spacing = 12
 
-  local list_scroll = content.add{type = "scroll-pane", name = "chroma_list_scroll", direction = "vertical"}
+  local list_scroll = row.add{type = "scroll-pane", name = "chroma_list_scroll", direction = "vertical"}
   list_scroll.style.minimal_width = 280
   list_scroll.style.maximal_height = 480
   build_list(list_scroll, player)
 
-  local detail = content.add{type = "flow", name = "chroma_detail_flow", direction = "vertical"}
+  local detail = row.add{type = "flow", name = "chroma_detail_flow", direction = "vertical"}
   detail.style.minimal_width = 320
   detail.add{type = "label", caption = "Selectionne un evenement ou une alerte a gauche."}
 end
@@ -1048,31 +1063,36 @@ function gui.toggle(player)
   local TAB_MIN_WIDTH = math.min(780, PANE_MAX_WIDTH)
   local TAB_MIN_HEIGHT = math.min(300, PANE_MAX_HEIGHT)
 
-  local function new_tab_content(caption, direction)
+  -- Contenu de chaque onglet = scroll-pane (pas un simple flow) : constate
+  -- en jeu (v1.8.19), certains onglets (Recherche & Vie, Ambiance,
+  -- Explorateur, Alertes personnalisees) ont un contenu naturellement plus
+  -- haut que PANE_MAX_HEIGHT -- avec un flow (qui ne scrolle pas), ce
+  -- surplus deborde hors de la boite au lieu d'y rester contenu. Un
+  -- scroll-pane, lui, ajoute une scrollbar au lieu de deborder. Comme
+  -- flow, il est stretchable par defaut (voir plus haut pourquoi c'est
+  -- desactive partout dans cette fenetre) -- mais horizontally_/vertically_
+  -- stretchable=false seul aurait pour effet pervers de retirer aussi le
+  -- plafond implicite qui declenche le scroll : ici on VEUT qu'il se
+  -- limite a PANE_MAX_HEIGHT (maximal_height) tout en restant capable de
+  -- se limiter a moins (pas de stretch), scrollant seulement le surplus.
+  local function new_tab_content(caption)
     local tab = pane.add{type = "tab", caption = caption}
-    local content = pane.add{type = "flow", direction = direction}
-    -- Un flow est stretchable par defaut (meme comportement que la fenetre
-    -- et le pane, voir plus haut) : sans le desactiver ici, le contenu de
-    -- chaque onglet se remplit jusqu'a PANE_MAX_WIDTH/HEIGHT (le plafond du
-    -- pane, potentiellement tres large sur un grand ecran) au lieu de
-    -- s'en tenir a sa taille naturelle -- exactement le fond gris qui
-    -- deborde de la barre d'onglets constate en jeu. minimal_width/height
-    -- (le plancher d'homogeneite, voir plus bas) restent la seule chose qui
-    -- l'empeche d'etre plus PETIT que TAB_MIN_WIDTH/HEIGHT.
+    local content = pane.add{type = "scroll-pane"}
     content.style.horizontally_stretchable = false
     content.style.vertically_stretchable = false
     content.style.minimal_width = TAB_MIN_WIDTH
     content.style.minimal_height = TAB_MIN_HEIGHT
+    content.style.maximal_height = PANE_MAX_HEIGHT
     pane.add_tab(tab, content)
     return content
   end
 
-  local content_config = new_tab_content("Evenements & alertes", "horizontal")
-  local content_bars = new_tab_content("Recherche & Vie", "vertical")
-  local content_ambiance = new_tab_content("Ambiance", "vertical")
-  local content_watches = new_tab_content("Alertes personnalisees", "vertical")
-  local content_explorer = new_tab_content("Explorateur", "vertical")
-  local content_export = new_tab_content("Export / Import", "vertical")
+  local content_config = new_tab_content("Evenements & alertes")
+  local content_bars = new_tab_content("Recherche & Vie")
+  local content_ambiance = new_tab_content("Ambiance")
+  local content_watches = new_tab_content("Alertes personnalisees")
+  local content_explorer = new_tab_content("Explorateur")
+  local content_export = new_tab_content("Export / Import")
 
   pane.selected_tab_index = TAB_CONFIG
 
@@ -1250,9 +1270,9 @@ function gui.on_click(event)
       mapping.custom_alert_watches = deep_copy(draft)
       write_mapping_file(player)
       player.print("Chroma Bridge : alertes personnalisees mises a jour.")
-      local content = tab_content(player, TAB_CONFIG)
-      if content then
-        build_list(content.chroma_list_scroll, player)
+      local row = config_row(player)
+      if row then
+        build_list(row.chroma_list_scroll, player)
       end
     end
     return
@@ -1280,9 +1300,9 @@ function gui.on_click(event)
     write_mapping_file(player)
     player.print("Chroma Bridge : configuration importee.")
     if field then field.text = "" end
-    local content = tab_content(player, TAB_CONFIG)
-    if content then
-      build_list(content.chroma_list_scroll, player)
+    local row = config_row(player)
+    if row then
+      build_list(row.chroma_list_scroll, player)
     end
     return
   end
