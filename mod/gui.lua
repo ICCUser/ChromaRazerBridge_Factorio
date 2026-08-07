@@ -984,11 +984,10 @@ function gui.toggle(player)
 
   local window = screen.add{type = "frame", name = "chroma_bridge_window", direction = "vertical"}
   window.auto_center = true
-  -- horizontally_stretchable=false : la fenetre ne s'etire pas au-dela de
-  -- ce que ses enfants demandent (proprete depuis la toute premiere version
-  -- a onglets). maximal_height : PLAFOND sur la fenetre elle-meme -- voir
-  -- plus bas pourquoi ce n'est plus le pane qui porte de contrainte de
-  -- hauteur.
+  -- stretchable=false : la fenetre ne s'etire pas au-dela de ce que ses
+  -- enfants demandent. maximal_height : filet de securite au cas ou (le
+  -- pane porte deja son propre plafond plus bas, la source habituelle du
+  -- probleme).
   window.style.horizontally_stretchable = false
   window.style.vertically_stretchable = false
   window.style.maximal_height = window_max_h
@@ -1023,15 +1022,18 @@ function gui.toggle(player)
   pane.style.horizontally_stretchable = false
   pane.style.vertically_stretchable = false
 
-  -- Largeur plafonnee sur le pane (jamais de taille exacte, voir doc
-  -- LuaStyle : minimal/maximal laissent le contenu determiner sa propre
-  -- taille naturelle dans ces bornes). La hauteur totale, elle, est bornee
-  -- via window.style.maximal_height ci-dessus plutot que directement sur le
-  -- pane -- le tabbed-pane ne redimensionne pas onglet par onglet (limite
-  -- connue du moteur, sans interface de modding pour ca), plus simple de
-  -- laisser la fenetre porter cette contrainte.
+  -- Plafond (jamais de taille exacte, voir doc LuaStyle : minimal/maximal
+  -- laissent le contenu determiner sa propre taille naturelle dans ces
+  -- bornes) sur le pane pour les deux axes -- confirme desormais SANS lien
+  -- avec le bug "fenetre reduite au bandeau de titre" (c'etait le sprite du
+  -- bouton fermer, voir plus haut) : sans ce plafond de hauteur, le pane se
+  -- remplit jusqu'a la hauteur offerte par la fenetre (window_max_h, quasi
+  -- tout l'ecran) au lieu de s'en tenir a la hauteur naturelle de son
+  -- contenu, malgre vertically_stretchable=false.
   local PANE_MAX_WIDTH = math.floor(math.max(780, math.min(window_max_w, avail_w * 0.45)))
+  local PANE_MAX_HEIGHT = math.floor(math.max(520, math.min(window_max_h - 80, avail_h * 0.55)))
   pane.style.maximal_width = PANE_MAX_WIDTH
+  pane.style.maximal_height = PANE_MAX_HEIGHT
 
   -- Plancher commun applique au contenu de chaque onglet (pas au pane) pour
   -- qu'aucun onglet peu charge (Ambiance, Recherche & Vie) ne rende une
@@ -1040,7 +1042,7 @@ function gui.toggle(player)
   -- dont le contenu a besoin de plus de place, seulement l'empecher d'etre
   -- plus PETIT que ce plancher.
   local TAB_MIN_WIDTH = math.min(780, PANE_MAX_WIDTH)
-  local TAB_MIN_HEIGHT = math.min(480, window_max_h - 80)
+  local TAB_MIN_HEIGHT = math.min(480, PANE_MAX_HEIGHT)
 
   local function new_tab_content(caption, direction)
     local tab = pane.add{type = "tab", caption = caption}
