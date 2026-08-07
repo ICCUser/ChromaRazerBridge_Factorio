@@ -477,19 +477,19 @@ local function build_config_tab(player)
   local list_scroll = content.add{type = "scroll-pane", name = "chroma_list_scroll", direction = "vertical"}
   list_scroll.style.minimal_width = 280
   list_scroll.style.maximal_height = 480
-  -- Remplit la hauteur du plancher commun TAB_MIN_HEIGHT (voir gui.toggle)
-  -- au lieu de s'arreter net a son propre contenu et de laisser un vide
-  -- gris en dessous -- la scrollbar reste utile si la liste elle-meme
-  -- depasse les 480px (maximal_height ci-dessus), independamment de ca.
+  -- Remplit la hauteur de la boite fixe du pane (voir PANE_HEIGHT dans
+  -- gui.toggle) au lieu de s'arreter net a son propre contenu et de laisser
+  -- un vide gris en dessous -- la scrollbar reste utile si la liste
+  -- elle-meme depasse les 480px (maximal_height ci-dessus), independamment
+  -- de ca.
   list_scroll.style.vertically_stretchable = true
   build_list(list_scroll, player)
 
   local detail = content.add{type = "flow", name = "chroma_detail_flow", direction = "vertical"}
   detail.style.minimal_width = 320
   -- Remplit l'espace restant plutot que de laisser un vide a droite quand la
-  -- liste (a gauche) est plus etroite que le plancher commun TAB_MIN_WIDTH
-  -- (voir gui.toggle) -- l'espace gagne pour l'homogeneite entre onglets ne
-  -- doit pas se voir comme un trou, juste comme plus de place pour le detail.
+  -- liste (a gauche) est plus etroite que la largeur fixe du pane (voir
+  -- PANE_WIDTH dans gui.toggle).
   detail.style.horizontally_stretchable = true
   detail.add{type = "label", caption = "Selectionne un evenement ou une alerte a gauche."}
 end
@@ -975,25 +975,13 @@ function gui.toggle(player)
 
   local window = screen.add{type = "frame", name = "chroma_bridge_window", direction = "vertical"}
   window.auto_center = true
-  -- Un frame ajoute a gui.screen ne s'etire pas tout seul, mais le
-  -- tabbed-pane qu'il contient (voir plus bas) l'est PAR DEFAUT -- sans ces
-  -- lignes, la fenetre entiere s'etirait sur presque toute la largeur de
-  -- l'ecran au lieu de se limiter a la largeur de son contenu (borne par
-  -- window_max_w/window_max_h ci-dessus uniquement si le contenu depasserait
-  -- l'ecran du joueur -- sinon la fenetre reste a sa taille naturelle, plus
-  -- petite).
-  -- horizontally_stretchable=false existait deja depuis v1.8.5 (evite que
-  -- la fenetre s'etire sur toute la largeur de l'ecran). vertically_
-  -- stretchable a la MEME valeur par defaut (true) sur le tabbed-pane, mais
-  -- ca n'avait pas d'impact visible tant qu'aucun plafond de hauteur
-  -- n'existait -- des l'ajout de window_max_h (v1.8.6) et du plancher
-  -- TAB_MIN_HEIGHT (v1.8.8), la fenetre s'etirait systematiquement jusqu'a
-  -- window_max_h (quasi tout l'ecran), meme pour un onglet dont le contenu
-  -- tient dans 200px -- l'espace vide massif remonte sur les captures.
+  -- La fenetre elle-meme n'a plus besoin de plafond explicite : sa taille
+  -- decoule desormais de celle, FIXE, du tabbed-pane qu'elle contient (voir
+  -- PANE_WIDTH/PANE_HEIGHT plus bas) plus la barre de titre et le
+  -- selecteur de layout au-dessus. stretchable=false pour ne pas grandir
+  -- au-dela de ce que ses enfants demandent.
   window.style.horizontally_stretchable = false
   window.style.vertically_stretchable = false
-  window.style.maximal_width = window_max_w
-  window.style.maximal_height = window_max_h
 
   -- Barre de titre construite a la main (au lieu du parametre `caption` du
   -- frame) pour pouvoir y accrocher un bouton "fermer" -- convention
@@ -1021,57 +1009,45 @@ function gui.toggle(player)
   local pane = window.add{type = "tabbed-pane", name = "chroma_tabbed_pane"}
   pane.style.horizontally_stretchable = false
   pane.style.vertically_stretchable = false
-  pane.style.maximal_width = window_max_w
 
-  -- Chaque onglet gardait sa largeur/hauteur NATURELLE (v1.8.6) : correct
-  -- pour empecher l'ecrasement du contenu (le bug d'origine), mais du coup
-  -- un onglet peu charge (Ambiance, Recherche & Vie) rendait une fenetre
-  -- visiblement plus petite qu'un onglet dense (Config, Explorateur) --
-  -- "certains onglets sont etendus, d'autres petits". Un plancher commun
-  -- (minimal_width/minimal_height, PAS width/height qui forcerait une
-  -- taille fixe et recreerait le bug d'ecrasement) applique a tous les
-  -- onglets uniformise la boite visible : jamais plus petit que ce plancher,
-  -- toujours libre de grandir au-dela si son propre contenu en a besoin.
-  -- Plafonne a window_max_w/h (l'ecran reel du joueur, voir plus haut) pour
-  -- rester coherent avec la fenetre elle-meme sur un tout petit ecran.
-  local TAB_MIN_WIDTH = math.min(800, window_max_w)
-  local TAB_MIN_HEIGHT = math.min(480, window_max_h - 80)
+  -- v1.8.6-1.8.9 essayaient d'obtenir une taille "naturelle mais plafonnee"
+  -- via minimal_width/height + maximal_width/height + stretchable=false.
+  -- Constat en jeu (captures) : le resultat reste instable -- la fenetre
+  -- s'etire quand meme jusqu'a son plafond au lieu de s'adapter au contenu
+  -- de l'onglet affiche, quel que soit l'onglet. Plutot que de continuer a
+  -- deviner le comportement exact du tabbed-pane sans pouvoir le verifier
+  -- visuellement, on fixe maintenant une taille DETERMINISTE (style.width /
+  -- style.height, qui fixent minimal ET maximal en une seule fois -- meme
+  -- mecanisme que ce qui limitait deja correctement la largeur en v1.8.5,
+  -- juste trop etroit a l'epoque) pour le pane lui-meme : garantit une boite
+  -- identique sur tous les onglets, par construction, sans dependre d'une
+  -- negociation de stretch ambigue.
+  --
+  -- Consequence : chaque onglet doit pouvoir gerer un contenu plus grand que
+  -- la boite -- chacun devient donc un scroll-pane (au lieu d'un simple
+  -- flow) qui remplit cette boite fixe (stretchable=true) ; le contenu qui
+  -- deborde scrolle DANS sa boite au lieu soit de deborder de l'ecran, soit
+  -- de forcer toute la fenetre a grandir de facon incoherente.
+  local PANE_WIDTH = math.floor(math.max(780, math.min(window_max_w, avail_w * 0.45)))
+  local PANE_HEIGHT = math.floor(math.max(520, math.min(window_max_h - 80, avail_h * 0.55)))
+  pane.style.width = PANE_WIDTH
+  pane.style.height = PANE_HEIGHT
 
-  local tab_config = pane.add{type = "tab", caption = "Evenements & alertes"}
-  local content_config = pane.add{type = "flow", direction = "horizontal"}
-  content_config.style.minimal_width = TAB_MIN_WIDTH
-  content_config.style.minimal_height = TAB_MIN_HEIGHT
-  pane.add_tab(tab_config, content_config)
+  local function new_tab_content(caption, direction)
+    local tab = pane.add{type = "tab", caption = caption}
+    local content = pane.add{type = "scroll-pane", direction = direction}
+    content.style.horizontally_stretchable = true
+    content.style.vertically_stretchable = true
+    pane.add_tab(tab, content)
+    return content
+  end
 
-  local tab_bars = pane.add{type = "tab", caption = "Recherche & Vie"}
-  local content_bars = pane.add{type = "flow", direction = "vertical"}
-  content_bars.style.minimal_width = TAB_MIN_WIDTH
-  content_bars.style.minimal_height = TAB_MIN_HEIGHT
-  pane.add_tab(tab_bars, content_bars)
-
-  local tab_ambiance = pane.add{type = "tab", caption = "Ambiance"}
-  local content_ambiance = pane.add{type = "flow", direction = "vertical"}
-  content_ambiance.style.minimal_width = TAB_MIN_WIDTH
-  content_ambiance.style.minimal_height = TAB_MIN_HEIGHT
-  pane.add_tab(tab_ambiance, content_ambiance)
-
-  local tab_watches = pane.add{type = "tab", caption = "Alertes personnalisees"}
-  local content_watches = pane.add{type = "flow", direction = "vertical"}
-  content_watches.style.minimal_width = TAB_MIN_WIDTH
-  content_watches.style.minimal_height = TAB_MIN_HEIGHT
-  pane.add_tab(tab_watches, content_watches)
-
-  local tab_explorer = pane.add{type = "tab", caption = "Explorateur"}
-  local content_explorer = pane.add{type = "flow", direction = "vertical"}
-  content_explorer.style.minimal_width = TAB_MIN_WIDTH
-  content_explorer.style.minimal_height = TAB_MIN_HEIGHT
-  pane.add_tab(tab_explorer, content_explorer)
-
-  local tab_export = pane.add{type = "tab", caption = "Export / Import"}
-  local content_export = pane.add{type = "flow", direction = "vertical"}
-  content_export.style.minimal_width = TAB_MIN_WIDTH
-  content_export.style.minimal_height = TAB_MIN_HEIGHT
-  pane.add_tab(tab_export, content_export)
+  local content_config = new_tab_content("Evenements & alertes", "horizontal")
+  local content_bars = new_tab_content("Recherche & Vie", "vertical")
+  local content_ambiance = new_tab_content("Ambiance", "vertical")
+  local content_watches = new_tab_content("Alertes personnalisees", "vertical")
+  local content_explorer = new_tab_content("Explorateur", "vertical")
+  local content_export = new_tab_content("Export / Import", "vertical")
 
   pane.selected_tab_index = TAB_CONFIG
 
